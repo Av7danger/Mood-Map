@@ -1,9 +1,3 @@
-# mood-map
-Perfect — let’s go all in! 🔥  
-Here’s the full setup including **Tech Stack** and **How It Works** sections that would fit beautifully into your README:
-
----
-
 # Mood Map
 
 **Mood Map** is a Chrome extension that analyzes the sentiment of social media posts in real-time using a custom-trained AI model. It features a Flask-powered backend that handles data processing and inference, ensuring fast, reliable, and secure sentiment prediction.
