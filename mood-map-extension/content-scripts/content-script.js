@@ -1,65 +1,31 @@
 console.log("content-script.js loaded");
 
-let iconMap = {};
-
-function scrapeProductDetails() {
+function scrapePostDetails() {
   const hostname = window.location.hostname;
 
-  switch (hostname) {
-    case "www.bigbasket.com":
-      return {
-        name:
-          document.querySelector("h1")?.innerText.trim() ||
-          "Product name not found in h1 tag.",
-      };
+  // Mapping of hostnames to their respective query selectors
+  const siteSelectors = {
+    "facebook.com": "h1",
+    "twitter.com": "h1",
+    "instagram.com": "h1",
+    "linkedin.com": ".post-header-name",
+    "reddit.com": "#postTitle",
+    "tiktok.com": ".VU-ZEz",
+    "pinterest.com": ".tw-text-600",
+  };
 
-    case "www.zeptonow.com":
-      return {
-        name:
-          document.querySelector("h1")?.innerText.trim() ||
-          "Product name not found in h1 tag.",
-      };
+  // Find the appropriate selector for the current hostname
+  const selector = Object.keys(siteSelectors).find((key) =>
+    hostname.includes(key)
+  );
 
-    case "www.swiggy.com":
-      return {
-        name:
-          document.querySelector("h1")?.innerText.trim() ||
-          "Product name not found in h1 tag.",
-      };
-
-    case "www.jiomart.com":
-      return {
-        name:
-          document.querySelector(".product-header-name")?.innerText.trim() ||
-          "Product name not found in h1 tag.",
-      };
-
-    case "www.amazon.in":
-      return {
-        name:
-          document.querySelector("#productTitle")?.innerText.trim() ||
-          "Product name not found in h1 tag.",
-      };
-
-    case "www.flipkart.com":
-      return {
-        name:
-          document.querySelector(".VU-ZEz").innerText ||
-          "Product name not found in .VU-ZEz class.",
-      };
-
-    case "blinkit.com":
-      return {
-        name:
-          document.querySelector(".tw-text-600").innerText ||
-          "Product name not found in .tw-text-600 class.",
-      };
-
-    default:
-      // If the hostname doesn't match any cases, return a default value
-      return {
-        name: "No product name found.",
-      };
+  if (selector) {
+    const postContent =
+      document.querySelector(siteSelectors[selector])?.innerText.trim() ||
+      "Post content not found.";
+    return { name: postContent };
+  } else {
+    console.warn(`No selector found for hostname: ${hostname}`);
+    return { name: "No post content found." };
   }
 }
-
