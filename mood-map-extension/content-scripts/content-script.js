@@ -23,9 +23,9 @@ function scrapePostDetails() {
     const postContent =
       document.querySelector(siteSelectors[selector])?.innerText.trim() ||
       "Post content not found.";
-    return { name: postContent };
+    return { name: postContent, link: `https://${selector}` };
   } else {
     console.warn(`No selector found for hostname: ${hostname}`);
-    return { name: "No post content found." };
+    return { name: "No post content found.", link: "" };
   }
 }
