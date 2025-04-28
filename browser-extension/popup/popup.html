@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="popup.css" />
+    <title>Mood Map</title>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1 class="title">Mood Map</h1>
+        <p class="subtitle">AI-Powered Sentiment & Summary</p>
+      </header>
+
+      <div class="sentiment-container">
+        <div class="sentiment-gauge">
+          <div class="sentiment-circle">
+            <div class="sentiment-score" id="sentiment-score">...</div>
+          </div>
+        </div>
+        <div class="sentiment-label" id="sentiment-label">Analyzing...</div>
+      </div>
+
+      <div class="summary-container" id="summary-container">
+        <h3>Summary & Reasoning</h3>
+        <div class="summary-text" id="summary-text">Analyzing content...</div>
+      </div>
+      
+      <div class="analyze-container">
+        <input type="text" id="input-text" placeholder="Type or paste text to analyze..." />
+        <button id="analyze-button"><span>Analyze</span></button>
+      </div>
+      
+      <div class="debug-container">
+        <div class="debug-btn-row">
+          <button id="test-backend-btn">Test Backend</button>
+          <button id="reload-extension-btn">Reload</button>
+        </div>
+        <div id="debug-output"></div>
+      </div>
+      
+      <footer class="footer">
+        <small>Powered by AI sentiment analysis</small>
+      </footer>
+    </div>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

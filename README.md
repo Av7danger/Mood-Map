@@ -45,3 +45,47 @@ The extension dynamically captures post content from supported platforms, secure
 
 6. **Continuous Updates:**  
    As the user scrolls, the extension keeps monitoring new content, ensuring real-time sentiment feedback without reloading the page.
+
+
+## 🛠 Installation
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/Av7danger/mood-map-extension.git
+   ```
+
+2. Navigate to the project directory:
+   ```bash
+   cd mood-map-extension
+   ```
+
+3. Load the extension in Chrome:
+   - Open Chrome and navigate to `chrome://extensions/`.
+   - Enable **Developer mode** (toggle in the top-right corner).
+   - Click **Load unpacked** and select the `mood-map-extension` folder.
+
+4. Start the backend server (if applicable):
+   - Navigate to the backend directory and follow its setup instructions.
+
+## 📖 Usage
+
+1. Open a supported social media platform (e.g., Twitter, Facebook).
+2. The extension will automatically analyze visible posts and overlay sentiment badges.
+3. Use the popup interface to configure settings or view additional details.
+
+## 🤝 Contributing
+
+1. Fork the repository.
+2. Create a new branch for your feature or bug fix:
+   ```bash
+   git checkout -b feature-name
+   ```
+3. Commit your changes:
+   ```bash
+   git commit -m "Add feature-name"
+   ```
+4. Push to your branch:
+   ```bash
+   git push origin feature-name
+   ```
+5. Open a pull request on GitHub.

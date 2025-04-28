@@ -172,3 +172,25 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Node.js modules
+node_modules/
+
+# --- Mood Map Project Custom Ignores ---
+# Model and vectorizer files
+src/models/model.pkl
+src/models/pytorch_model.pt
+src/utils/vectorizer.pkl
+
+# Backend model cache and logs
+backend/model_cache/
+backend/logs/
+
+# Browser extension build/test artifacts
+browser-extension/lib/
+browser-extension/coverage/
+browser-extension/dist/
+
+# Data outputs
+/data/processed/
+/results/

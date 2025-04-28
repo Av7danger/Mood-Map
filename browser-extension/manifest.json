@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Mood Map",
+  "version": "1.0.1",
+  "description": "Analyze the sentiment of social media posts in real-time using AI.",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": [
+    "https://*.facebook.com/*",
+    "https://*.twitter.com/*",
+    "https://*.instagram.com/*",
+    "https://*.linkedin.com/*",
+    "https://*.reddit.com/*"
+  ],
+  "background": {
+    "service_worker": "mood_analyzer_background.js"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "assets/icons/browser-extension-icon.png",
+      "48": "assets/icons/browser-extension-icon.png",
+      "128": "assets/icons/browser-extension-icon.png"
+    }
+  },
+  "icons": {
+    "16": "assets/icons/browser-extension-icon.png",
+    "48": "assets/icons/browser-extension-icon.png",
+    "128": "assets/icons/browser-extension-icon.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*/*"],
+      "js": ["content-scripts/mood_analyzer.js"],
+      "css": ["content-scripts/mood_analyzer.css"]
+    }
+  ]
+}
