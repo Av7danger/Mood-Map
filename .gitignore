@@ -194,3 +194,5 @@ browser-extension/dist/
 # Data outputs
 /data/processed/
 /results/
+backend/model.pkl
+data/raw/training.1600000.processed.noemoticon.csv
