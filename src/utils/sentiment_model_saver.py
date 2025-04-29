@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import joblib
-from transformers import DistilBertTokenizer, DistilBertModel
+from transformers import DistilBertTokenizer, DistilBertModel, BertTokenizer, BertModel
 from src.utils.logging_utils import setup_logging
 
 # Setup logging
@@ -9,13 +9,21 @@ logger = setup_logging("model_saver_logs.log")
 
 # Define the model architecture to match what was used in training
 class SentimentClassifier(nn.Module):
-    """Neural network model for sentiment analysis using DistilBERT."""
-    def __init__(self, hidden_dim=768, output_dim=2):
+    """Neural network model for sentiment analysis using DistilBERT or BERT."""
+    def __init__(self, model_type="distilbert", hidden_dim=768, output_dim=2):
         super(SentimentClassifier, self).__init__()
-        self.bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
-        # Freeze DistilBERT parameters
-        for param in self.bert.parameters():
-            param.requires_grad = False
+        self.model_type = model_type
+        
+        if model_type == "bert":
+            self.bert = BertModel.from_pretrained('bert-base-uncased')
+            # Freeze BERT parameters
+            for param in self.bert.parameters():
+                param.requires_grad = False
+        else:
+            self.bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
+            # Freeze DistilBERT parameters
+            for param in self.bert.parameters():
+                param.requires_grad = False
             
         # Classification head with the same structure used in training
         self.classifier = nn.Sequential(
@@ -31,14 +39,21 @@ class SentimentClassifier(nn.Module):
     def forward(self, input_ids, attention_mask):
         with torch.no_grad():
             outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
-            pooled_output = outputs.last_hidden_state[:, 0, :]
+            if self.model_type == "bert":
+                pooled_output = outputs.pooler_output
+            else:
+                pooled_output = outputs.last_hidden_state[:, 0, :]
         return self.classifier(pooled_output)
 
 # Define the wrapper class at the module level to make it picklable
 class SentimentAnalysisModelWrapper:
-    def __init__(self, model):
+    def __init__(self, model, model_type="distilbert"):
         self.model = model
-        self.tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
+        self.model_type = model_type
+        if model_type == "bert":
+            self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        else:
+            self.tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
     
     def predict(self, texts):
         """Process texts and return sentiment predictions (0: Negative, 1: Positive)"""

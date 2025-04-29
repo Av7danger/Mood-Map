@@ -357,6 +357,8 @@ def train_model(model, train_data, val_data, device, batch_size=BATCH_SIZE, epoc
     except Exception as e:
         logger.error(f"Error during model training: {e}")
 
+from src.utils.sentiment_model_saver import SentimentAnalysisModelWrapper, save_model
+
 def save_model(model, model_type=MODEL_TYPE, output_path='model.pkl'):
     """Save the trained model for application use."""
     print(f"Saving model to {output_path}...")
@@ -364,50 +366,12 @@ def save_model(model, model_type=MODEL_TYPE, output_path='model.pkl'):
     # Move model to CPU for saving
     model.cpu()
     
-    # Create a wrapper class that will handle tokenization and prediction
-    class SentimentAnalysisModelWrapper:
-        def __init__(self, model, model_type):
-            self.model = model
-            self.model_type = model_type
-            
-            if model_type == "bert":
-                self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-            else:
-                self.tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
-        
-        def predict(self, texts):
-            """Process texts and return sentiment predictions (0: Negative, 1: Positive)"""
-            # Convert to list if single string
-            if isinstance(texts, str):
-                texts = [texts]
-            
-            # Tokenize the texts
-            encoded = self.tokenizer(
-                texts,
-                padding=True,
-                truncation=True,
-                max_length=512,
-                return_tensors='pt'
-            )
-            
-            # Get model predictions
-            self.model.eval()
-            with torch.no_grad():
-                outputs = self.model(
-                    input_ids=encoded['input_ids'],
-                    attention_mask=encoded['attention_mask']
-                )
-                _, predictions = torch.max(outputs, 1)
-            
-            # Convert to list
-            return predictions.tolist()
-    
-    # Create the wrapper model
+    # Create the wrapper model using the utility from sentiment_model_saver.py
     wrapper_model = SentimentAnalysisModelWrapper(model, model_type)
     
     # Save using joblib
     try:
-        joblib.dump(wrapper_model, output_path)
+        save_model(wrapper_model, output_path)
         print(f"Model successfully saved to {output_path}")
         
         # Test the saved model
