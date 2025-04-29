@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const summaryContainer = document.getElementById('summary-container');
     const analyzeButton = document.getElementById('analyze-button');
     const inputText = document.getElementById('input-text');
+    const darkModeButton = document.getElementById('dark-mode-toggle');
     
     // First check backend connectivity
     checkBackendConnectivity();
@@ -388,6 +389,27 @@ document.addEventListener('DOMContentLoaded', () => {
         debugOutput.innerHTML += `<div>[${timestamp}] ${message}</div>`;
         debugOutput.scrollTop = debugOutput.scrollHeight;
         console.log(`[Debug] ${message}`);
+    }
+
+    const toggleDarkMode = () => {
+        const root = document.documentElement;
+        const isDarkMode = root.style.getPropertyValue('--background-color') === '#121212';
+
+        if (isDarkMode) {
+            // Switch to light mode
+            root.style.setProperty('--background-color', '#ffffff');
+            root.style.setProperty('--text-color', '#000000');
+            root.style.setProperty('--border-color', '#cccccc');
+        } else {
+            // Switch to dark mode
+            root.style.setProperty('--background-color', '#121212');
+            root.style.setProperty('--text-color', '#e0e0e0');
+            root.style.setProperty('--border-color', '#333333');
+        }
+    };
+
+    if (darkModeButton) {
+        darkModeButton.addEventListener('click', toggleDarkMode);
     }
 });
 
