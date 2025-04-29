@@ -7,6 +7,9 @@ import torch
 import datetime
 import json
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
+from src.utils.input_validation import validate_input
+from src.models.sentiment_analyzer import analyze_sentiment
+import logging
 
 # Add the src/models directory to the path to import from sentiment_analyzer
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -15,6 +18,13 @@ from sentiment_analyzer import SentimentModel
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
+
+# Setup logging
+logging.basicConfig(
+    filename="backend_logs.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 # Set up request logging
 def log_request(route, req_data=None, status=None, error=None):
@@ -49,6 +59,10 @@ def log_request(route, req_data=None, status=None, error=None):
     
     with open(log_file, 'a') as f:
         f.write(f"{json.dumps(log_entry)}\n")
+
+# Load configuration
+with open("sentiment_api_config.json", "r") as config_file:
+    config = json.load(config_file)
 
 # Load the sentiment analysis model
 try:
@@ -582,7 +596,24 @@ def generate_model_opinion(sentiment_category, sentiment_label):
     
     return basic_opinions.get(category, "This content is neutral.")
 
-if __name__ == '__main__':
+@app.route("/api/sentiment", methods=["POST"])
+def sentiment_analysis():
+    try:
+        data = request.get_json()
+        if not validate_input(data):
+            logging.warning("Invalid input received.")
+            return jsonify({"error": "Invalid input."}), 400
+
+        text = data.get("text", "")
+        sentiment = analyze_sentiment(text)
+        logging.info(f"Sentiment analysis successful for text: {text}")
+        return jsonify(sentiment)
+
+    except Exception as e:
+        logging.error(f"Error during sentiment analysis: {e}")
+        return jsonify({"error": "Internal server error."}), 500
+
+if __name__ == "__main__":
     print("==================================================")
     print("Mood Map API Server Starting")
     print("Request logging enabled - monitoring for extension requests")
@@ -593,4 +624,4 @@ if __name__ == '__main__':
     load_summarization_model()
     
     # Start the server
-    app.run(debug=False)  # Turn off debug mode for production
+    app.run(ssl_context=("cert.pem", "key.pem"))  # Enable HTTPS
