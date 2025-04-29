@@ -335,3 +335,27 @@ if (isIndividualPostPage(currentUrl)) {
         }
     }, 1000);
 }
+
+// Add dark mode toggle functionality
+const toggleDarkMode = () => {
+    const root = document.documentElement;
+    const isDarkMode = root.style.getPropertyValue('--background-color') === '#121212';
+
+    if (isDarkMode) {
+        // Switch to light mode
+        root.style.setProperty('--background-color', '#ffffff');
+        root.style.setProperty('--text-color', '#000000');
+        root.style.setProperty('--border-color', '#cccccc');
+    } else {
+        // Switch to dark mode
+        root.style.setProperty('--background-color', '#121212');
+        root.style.setProperty('--text-color', '#e0e0e0');
+        root.style.setProperty('--border-color', '#333333');
+    }
+};
+
+// Add event listener for dark mode toggle button
+const darkModeButton = document.getElementById('dark-mode-toggle');
+if (darkModeButton) {
+    darkModeButton.addEventListener('click', toggleDarkMode);
+}
