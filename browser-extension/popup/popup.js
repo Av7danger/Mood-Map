@@ -180,11 +180,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 sentimentType = 'neutral';
         }
 
-        // Use backend's percentage and label
-        sentimentScore.textContent = (response.sentiment_percentage !== undefined)
-            ? `${response.sentiment_percentage}%`
-            : '...';
-        sentimentLabel.textContent = response.sentiment || 'Unknown';
+        // Display emojis instead of percentage
+        if (response.sentiment_emojis) {
+            // Use primary emoji as the main display
+            sentimentScore.textContent = response.sentiment_emojis.primary;
+            // Show both emojis in the label
+            sentimentLabel.innerHTML = `${response.sentiment_emojis.primary} ${response.sentiment_emojis.secondary}`;
+        } else {
+            // Fallback if emojis aren't available
+            sentimentScore.textContent = (response.sentiment_percentage !== undefined)
+                ? `${response.sentiment_percentage}%`
+                : '...';
+            sentimentLabel.textContent = response.sentiment || 'Unknown';
+        }
 
         // Remove any existing sentiment classes
         sentimentLabel.classList.remove(
@@ -231,7 +239,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (response.text && response.text.length > 200) {
                 chrome.runtime.sendMessage({ 
                     type: 'summarizeText', 
-                    text: response.text 
+                    text: response.text,
+                    sentiment_category: response.prediction,
+                    sentiment_label: response.sentiment
                 }, summaryResponse => {
                     if (summaryResponse && summaryResponse.summary) {
                         summaryText.textContent = summaryResponse.summary;

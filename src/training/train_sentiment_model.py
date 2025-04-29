@@ -9,6 +9,7 @@ from sklearn.model_selection import train_test_split
 import joblib
 import numpy as np
 from transformers import BertTokenizer, BertModel, DistilBertTokenizer, DistilBertModel
+import pandas as pd  # Add this import for handling CSV files
 
 # Configure CUDA settings to avoid device-side assert errors
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # Better error reporting
@@ -167,6 +168,43 @@ def prepare_data(processed_data_path, device, model_type=MODEL_TYPE):
     
     except Exception as e:
         print(f"Error preparing data: {e}")
+        import traceback
+        traceback.print_exc()
+        return None, None, None, None, None, None
+
+def prepare_data_with_new_dataset(raw_data_path, processed_data_path, device, model_type=MODEL_TYPE):
+    """Load raw data from CSV, preprocess, and prepare for training."""
+    print(f"Loading raw data from {raw_data_path}...")
+    try:
+        # Load the new dataset
+        df = pd.read_csv(raw_data_path)
+        
+        # Ensure the dataset has the required columns and rename them
+        df.columns = ['label', 'id', 'date', 'query', 'user', 'text']
+        
+        # Map labels to binary (0: Negative, 1: Positive)
+        label_mapping = {0: 0, 4: 1}  # Adjust as needed for your dataset
+        df['label'] = df['label'].map(label_mapping)
+        
+        # Tokenize the text data
+        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased') if model_type == "bert" else DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
+        encodings = tokenizer(
+            df['text'].tolist(),
+            padding=True,
+            truncation=True,
+            max_length=512,
+            return_tensors='pt'
+        )
+        
+        # Save the processed data for reuse
+        torch.save({'encodings': encodings, 'labels': torch.tensor(df['label'].values)}, processed_data_path)
+        print(f"Processed data saved to {processed_data_path}")
+        
+        # Call the existing prepare_data function to split and balance the data
+        return prepare_data(processed_data_path, device, model_type)
+    
+    except Exception as e:
+        print(f"Error preparing data with new dataset: {e}")
         import traceback
         traceback.print_exc()
         return None, None, None, None, None, None
@@ -390,29 +428,43 @@ def main():
     """Main execution function."""
     # Check if GPU is available
     gpu_available = verify_gpu()
-    
+
     # Set device to GPU if available, otherwise CPU
     device = torch.device('cuda') if gpu_available else torch.device('cpu')
     print(f"Using device: {device}")
-    
+
     # Reset GPU state
     if gpu_available:
         reset_gpu()
-    
-    # Load preprocessed data
-    train_input_ids, train_attn_mask, val_input_ids, val_attn_mask, train_labels, val_labels = prepare_data(
-        'processed_data.pt', device, model_type=MODEL_TYPE
-    )
-    
+
+    # Allow user to choose between new dataset and preprocessed data
+    use_new_dataset = input("Use new dataset? (yes/no): ").strip().lower() == 'yes'
+
+    if use_new_dataset:
+        raw_data_path = os.path.join('data', 'raw', 'sentimentdataset.csv')
+        processed_data_path = 'processed_data_with_new_dataset.pt'
+
+        # Prepare data using the new dataset
+        train_input_ids, train_attn_mask, val_input_ids, val_attn_mask, train_labels, val_labels = prepare_data_with_new_dataset(
+            raw_data_path, processed_data_path, device, model_type=MODEL_TYPE
+        )
+    else:
+        processed_data_path = 'processed_data.pt'
+
+        # Prepare data using preprocessed data
+        train_input_ids, train_attn_mask, val_input_ids, val_attn_mask, train_labels, val_labels = prepare_data(
+            processed_data_path, device, model_type=MODEL_TYPE
+        )
+
     if train_input_ids is None:
         print("Failed to prepare data. Exiting.")
-        return
-    
+        sys.exit(1)
+
     # Initialize model
     try:
         model = SentimentClassifier(model_type=MODEL_TYPE).to(device)
         print(f"Created {MODEL_TYPE.upper()} model and moved to {device}")
-        
+
         # Train model with optimized fast parameters
         trained_model, accuracy = train_model(
             model, 
@@ -423,18 +475,18 @@ def main():
             epochs=EPOCHS,  # Use the fast epochs constant
             model_type=MODEL_TYPE
         )
-        
+
         # Save model with lower threshold for quick results
         if accuracy > SAVE_THRESHOLD:
             save_model(trained_model, model_type=MODEL_TYPE)
         else:
             print(f"Model accuracy ({accuracy:.2f}%) is below target of {SAVE_THRESHOLD}%. Model not saved.")
-        
+
     except Exception as e:
         print(f"Error during model training: {e}")
         import traceback
         traceback.print_exc()
-    
+
     # Final cleanup
     if gpu_available:
         reset_gpu()

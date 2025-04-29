@@ -3,6 +3,9 @@ import torch
 from transformers import pipeline
 import numpy as np
 import re
+import datetime
+import os
+import json
 
 class SentimentModel:
     """A wrapper around Hugging Face's sentiment analysis pipeline for nuanced sentiment analysis."""
@@ -48,7 +51,12 @@ class SentimentModel:
             "gratifying", "favorable", "agreeable", "likable", "worthy",
             "satisfying", "well-made", "well made", "beneficial", "worthy",
             "improved", "enjoyable", "deserves", "pleased", "pretty good",
-            "value", "valuable", "handy", "practical", "efficient", "well done"
+            "value", "valuable", "handy", "practical", "efficient", "well done",
+            # Adding new social media positive terms
+            "vibe", "vibey", "W", "dub", "valid", "iconic", "slay", "flex", 
+            "wholesome", "based", "goated", "bussin", "chef's kiss", "elite",
+            "hits different", "clean", "fresh", "quality", "superior", "100",
+            "stan", "underrated", "top tier", "bet", "facts", "legit"
         ]
         
         self.very_positive_keywords = [
@@ -62,7 +70,13 @@ class SentimentModel:
             "unparalleled", "revolutionary", "transcendent", "impeccable", "game-changer",
             "ecstatic", "overjoyed", "elated", "beyond expectations", "exceeded expectations",
             "adore", "fantastic", "fabulous", "astonishing", "blown away", "awe-inspiring",
-            "masterful", "masterpiece", "couldn't be better", "absolutely loved"
+            "masterful", "masterpiece", "couldn't be better", "absolutely loved",
+            # Adding new social media very positive terms
+            "GOAT", "fire", "lit", "god tier", "absolutely goated", "insane",
+            "immaculate", "unreal", "elite", "next level", "top tier", "god tier",
+            "legendary", "cracked", "immaculate vibes", "chef's kiss", "no notes",
+            "hitting", "slaps", "straight fire", "undefeated", "peak", "goes hard",
+            "banger", "absolute W", "massive W", "certified fresh"
         ]
         
         self.negative_keywords = [
@@ -75,7 +89,13 @@ class SentimentModel:
             "regret", "regrettable", "shortcomings", "defects", "disappoints",
             "fails", "failed", "frustrates", "frustration", "bothersome",
             "troubled", "concerning", "worse", "overrated", "below average",
-            "not good", "not great", "not recommended", "not impressed"
+            "not good", "not great", "not recommended", "not impressed",
+            # Adding new social media negative terms
+            "meh", "mid", "not it", "ain't it", "basic", "weak", "lame", "yikes",
+            "yikes", "sketchy", "sus", "shady", "questionable", "overhyped",
+            "cap", "capping", "wack", "clapped", "L", "taking an L", "ratio",
+            "fell off", "average", "lowkey bad", "not the move", "down bad",
+            "touch grass", "nah", "pass", "skipping", "unimpressed", "not worth"
         ]
         
         self.very_negative_keywords = [
@@ -90,18 +110,29 @@ class SentimentModel:
             "failure", "mess", "total disaster", "complete failure", "absolutely terrible",
             "horrifying", "hideous", "catastrophe", "the worst ever", "absolutely hate",
             "garbage", "trash", "junk", "worst experience", "stay away", "run away from",
-            "never again", "beyond awful", "completely useless", "utter disappointment"
+            "never again", "beyond awful", "completely useless", "utter disappointment",
+            # Adding new social media very negative terms
+            "trash", "pure garbage", "dogwater", "dumpster fire", "absolute L", 
+            "massive L", "scam", "nightmare fuel", "cursed", "cancer", "toxic",
+            "hot garbage", "cringe", "cope", "train wreck", "absolute joke",
+            "not even mid", "below mid", "bottom tier", "hot mess", "dead",
+            "flop", "flopped", "fraud", "waste of time", "atrocious",
+            "straight trash", "unhinged", "delusional", "worst thing ever",
+            "never touching this again", "avoid at all costs", "get your eyes checked"
         ]
         
         # High priority negative words that should have stronger influence on sentiment
         self.priority_negative_words = [
             "trash", "garbage", "terrible", "awful", "horrible", "hate", "disgusting",
-            "useless", "waste", "pathetic", "worst"
+            "useless", "waste", "pathetic", "worst", "dumpster fire", "massive L",
+            "cringe", "toxic", "scam", "flop", "dogwater", "pure garbage"
         ]
         
         # High priority positive words
         self.priority_positive_words = [
-            "amazing", "excellent", "perfect", "love", "incredible", "outstanding"
+            "amazing", "excellent", "perfect", "love", "incredible", "outstanding",
+            "GOAT", "fire", "lit", "immaculate", "god tier", "absolutely goated", 
+            "top tier", "legendary", "massive W", "certified fresh", "slaps"
         ]
         
         # Intensifiers that amplify the sentiment
@@ -112,7 +143,12 @@ class SentimentModel:
             "immensely", "hugely", "vastly", "insanely", "ridiculously", "seriously",
             "unbelievably", "amazingly", "remarkably", "decidedly", "highly",
             "profoundly", "deeply", "overwhelmingly", "purely", "super", "mega",
-            "ultra", "extra", "beyond", "exceedingly", "extraordinarily"
+            "ultra", "extra", "beyond", "exceedingly", "extraordinarily",
+            # New intensifiers from social media
+            "af", "asf", "hella", "mad", "deadass", "literally", "literally just",
+            "straight up", "straight", "actually", "low key", "high key", "fr",
+            "frfr", "no cap", "actually", "100%", "absolutely", "definitely", 
+            "without a doubt", "undeniably"
         ]
         
         # Common positive and negative hashtags
@@ -123,7 +159,11 @@ class SentimentModel:
             "goodvibes", "bestday", "perfect", "smile", "motivated", "thankful",
             "fun", "hope", "peace", "celebrate", "victory", "achievement", "proud",
             "supportive", "inspiring", "favorite", "wow", "gorgeous", "excellence",
-            "champion", "yay", "congrats", "congratulations", "blessings", "goodnews"
+            "champion", "yay", "congrats", "congratulations", "blessings", "goodnews",
+            # New positive hashtags
+            "vibes", "wholesome", "needthis", "trending", "viral", "impressive",
+            "respected", "elite", "premium", "quality", "fresh", "stunning",
+            "masterpiece", "aesthetic", "iconic", "slay", "mood", "obsessed"
         ]
         
         self.negative_hashtags = [
@@ -134,7 +174,13 @@ class SentimentModel:
             "badday", "disaster", "tragedy", "tragic", "disgusted", "disgusting",
             "horrible", "terrible", "awful", "ugh", "fml", "smh", "wtf", "outraged",
             "shame", "shameful", "pathetic", "ridiculous", "meaningless", "waste",
-            "useless", "hardship", "struggle", "suffering", "victim", "trauma"
+            "useless", "hardship", "struggle", "suffering", "victim", "trauma",
+            # New negative hashtags
+            "cringe", "cursed", "scam", "sus", "toxic", "redflags", "warning",
+            "dontwasteyourtime", "disappointed", "notworth", "avoid", "staywoke",
+            "dontbefooled", "hurtful", "triggered", "frustrated", "boycott",
+            "cancelled", "problematic", "backlash", "scandal", "controversy",
+            "dumpsterfire", "worstever", "flop", "eyeroll", "unfollowing"
         ]
         
         # Patterns for detecting mixed sentiment
@@ -164,17 +210,74 @@ class SentimentModel:
             r"hit or miss"
         ]
         
-        # Emoji sentiment lists
+        # Enhanced emoji lists with newer emojis
+        # Positive emojis - updated with newer emojis
         self.positive_emojis = [
-            "😀", "😃", "😄", "😁", "😆", "😊", "😇", "🙂", "😍", "🥰", "😘", "😗", "😙", "😚", "😋", "😜", "😝", "😛", "🤗", "🤩", "🥳", "😺", "😸", "😻", "👍", "👏", "💪", "🙌", "🎉", "✨", "💖", "❤️", "💕", "💞", "💓", "💗", "💙", "💚", "💛", "💜", "🧡", "🤍", "🤎", "💯", "✔️", "😎", "😌", "😺", "😸", "😹", "😻", "😽", "😼", "😺", "😸", "😹", "😻", "😽", "😼", "😺", "😸", "😹", "😻", "😽", "😼"
+            # Traditional positive emojis
+            "😀", "😃", "😄", "😁", "😆", "😊", "😇", "🙂", "😍", "🥰", "😘", "😗", "😙", "😚", 
+            "😋", "😜", "😝", "😛", "🤗", "🤩", "🥳", "😺", "😸", "😻", "👍", "👏", "💪", "🙌", 
+            "🎉", "✨", "💖", "❤️", "💕", "💞", "💓", "💗", "💙", "💚", "💛", "💜", "🧡", "🤍", 
+            "🤎", "💯", "✔️", "😎", "😌",
+            
+            # Newer positive emojis
+            "🔥", "💅", "✌️", "🤟", "🤙", "👊", "🫶", "🥹", "🤭", "🥺", "😌", "😮‍💨", "🥂",
+            "🙏", "🤞", "✅", "💯", "🔝", "💫", "⭐", "🌟", "💎", "🏆", "🥇", "🎯", "✨", 
+            "🍾", "🎊", "🎁", "❣️", "♥️", "🚀", "⚡", "📈", "🌻", "🌺", "🌈", "🌞", "🌠",
+            "💰", "💪", "👌", "💅", "🌸", "🌹", "👑", "✅", "🫠", "❤️‍🔥", "🦾", "🫂",
+            "😭🙌", "😩👌", "😌✨", "😫👏", "🤌", "🫴", "🤣👍", "😊💕", "🙏🔥"
         ]
+        
+        # Negative emojis - updated with newer emojis
         self.negative_emojis = [
-            "😞", "😔", "😟", "😕", "🙁", "☹️", "😣", "😖", "😫", "😩", "🥺", "😢", "😭", "😤", "😠", "😡", "🤬", "👎", "😾", "😿", "🙀", "😱", "😨", "😰", "😥", "😓", "😒", "😓", "😔", "😞", "😢", "😭", "😤", "😠", "😡", "🤬", "👎", "💔", "😾", "😿", "🙀", "😱", "😨", "😰", "😥", "😓", "😒", "😓", "😔", "😞", "😢", "😭", "😤", "😠", "😡", "🤬", "👎", "💔"
+            # Traditional negative emojis
+            "😞", "😔", "😟", "😕", "🙁", "☹️", "😣", "😖", "😫", "😩", "🥺", "😢", "😭", "😤", 
+            "😠", "😡", "🤬", "👎", "😾", "😿", "🙀", "😱", "😨", "😰", "😥", "😓", "😒",
+            
+            # Newer negative emojis
+            "💔", "😬", "🙄", "😑", "😐", "😶", "😏", "🫤", "🫥", "😮‍💨", "🫠", "🤐", "🤕",
+            "🤢", "🤮", "😷", "🥴", "😵", "🫣", "👀", "⚰️", "☠️", "💀", "🖕", "⛔", "🚫",
+            "📉", "🗑️", "💩", "🤦‍♀️", "🤦‍♂️", "🤦", "🤷‍♀️", "🤷‍♂️", "🤷", "🫡", "🥱",
+            "😮‍💨", "🙃", "😶‍🌫️", "😵‍💫", "😵", "🤯", "😳", "🚮", "🔪", "❌", "⛔",
+            "👎🙄", "😠💢", "👋😒", "🤢🤮", "🤷‍♀️💀", "😭💔", "😞👎", "😡🚫"
         ]
+        
+        # Neutral emojis - updated with newer emojis
         self.neutral_emojis = [
-            "😐", "😑", "😶", "🤔", "😬", "🤨", "😏", "😒", "😕", "😯", "😲", "😳", "😦", "😧", "😮", "😴", "🤤", "😪", "😵", "🤐", "🤢", "🤮", "😷", "🤒", "🤕", "🤑", "😲", "😯", "😮", "😬", "🤔", "😑", "😐", "😶"
+            # Traditional neutral emojis
+            "😐", "😑", "😶", "🤔", "😬", "🤨", "😏", "😒", "😕", "😯", "😲", "😳", "😦", 
+            "😧", "😮", "😴", "🤤", "😪", "😵", "🤐", "🤢", "🤮", "😷", "🤒", "🤕", "🤑",
+            
+            # Newer neutral emojis
+            "🫠", "🫣", "🫤", "🫡", "🫥", "😶‍🌫️", "❓", "❔", "⁉️", "‼️", "🤷", "🤔", "🧐",
+            "👀", "👁️", "🗿", "💭", "🫦", "🕰️", "🧠", "🦧", "🫰", "🤌", "🦾", "🧘", "🧘‍♀️",
+            "🧘‍♂️", "🕯️", "🧿", "🫙", "😬🤔", "👀👄👀", "🤨📸", "🧐🤷", "🚶‍♀️🚶‍♂️"
         ]
 
+        # Special context-sensitive emojis
+        self.context_sensitive_emojis = {
+            # Emojis that change meaning based on context
+            "😂": {
+                "default": "positive",  # Default interpretation
+                "positive_contexts": ["funny", "lol", "lmao", "hilarious", "joke", "haha", "laugh", "comedy", "humor"],
+                "negative_contexts": ["fail", "dumb", "stupid", "ridiculous", "pathetic", "embarrassing", "sad", "crying"]
+            },
+            "💀": {
+                "default": "negative",  # Default interpretation
+                "positive_contexts": ["funny", "lol", "lmao", "hilarious", "joke", "dead", "im dead", "i'm dead", "killed me"],
+                "negative_contexts": ["terrible", "awful", "embarrassing", "cringe", "bad", "fail"]
+            },
+            "😭": {
+                "default": "negative",  # Default interpretation
+                "positive_contexts": ["beautiful", "touching", "moved", "emotional", "love", "amazing", "perfect", "so good"],
+                "negative_contexts": ["sad", "upset", "hurt", "painful", "depressing", "terrible", "awful"]
+            },
+            "😩": {
+                "default": "negative",  # Default interpretation
+                "positive_contexts": ["good", "amazing", "perfect", "so good", "delicious", "satisfying", "incredible"],
+                "negative_contexts": ["exhausted", "tired", "frustrated", "annoying", "upset", "sad"]
+            }
+        }
+        
         # --- Expanded mixed/ambiguous keywords and patterns ---
         self.mixed_keywords = [
             "bittersweet", "love-hate", "mixed feelings", "conflicted", "ambivalent", "torn", "double-edged",
@@ -192,6 +295,85 @@ class SentimentModel:
             r"complicated", r"not black and white", r"not clear cut", r"in two minds", r"split feelings",
             r"paradoxical"
         ]
+        
+        # Social media abbreviations and their sentiment implications
+        self.social_media_abbreviations = {
+            # Positive
+            "gg": "positive",  # good game
+            "ily": "positive",  # I love you
+            "ilysm": "positive",  # I love you so much
+            "goat": "positive",  # greatest of all time
+            "lol": "positive",  # laughing out loud
+            "lmao": "positive",  # laughing my ass off
+            "rofl": "positive",  # rolling on floor laughing
+            "tysm": "positive",  # thank you so much
+            "lfg": "positive",  # let's f***ing go
+            "fr": "neutral",    # for real (enhances whatever it's attached to)
+            "frfr": "neutral",  # for real for real (stronger enhancer)
+            "tbh": "neutral",   # to be honest
+            "fwiw": "neutral",  # for what it's worth
+            "imo": "neutral",   # in my opinion
+            "imho": "neutral",  # in my humble opinion
+            "idk": "neutral",   # I don't know
+            "ngl": "neutral",   # not gonna lie
+            
+            # Negative
+            "smh": "negative",  # shaking my head
+            "fml": "negative",  # f*** my life
+            "kms": "negative",  # kill myself (hyperbolic expression of frustration)
+            "kys": "negative",  # kill yourself (highly negative)
+            "stfu": "negative", # shut the f*** up
+            "gtfo": "negative", # get the f*** out
+            "ffs": "negative",  # for f***'s sake
+            "wtf": "negative",  # what the f***
+            "lmfao": "positive", # laughing my f***ing ass off (usually positive despite f-word)
+            "istg": "negative",  # I swear to god (usually frustration)
+            "pos": "negative",   # piece of s***
+            "af": "neutral",     # as f*** (intensifier)
+            "asf": "neutral",    # as f*** (intensifier)
+            "bs": "negative",    # bulls***
+            "ftw": "positive",   # for the win
+            "goated": "positive", # greatest of all time (adjective form)
+            "based": "positive",  # cool, agreeable
+            "cap": "negative",    # lie/fake
+            "no cap": "positive", # no lie/truth
+            "cringe": "negative", # embarrassing
+            "sus": "negative",    # suspicious
+            "fomo": "negative",   # fear of missing out
+            "salty": "negative",  # bitter/upset
+            "slaps": "positive",  # excellent (music/food)
+            "snack": "positive",  # attractive person
+            "shook": "neutral",   # surprised
+            "stan": "positive",   # big fan
+            "thirsty": "negative", # desperate
+            "yeet": "neutral",    # throw/discard
+            "simp": "negative",   # overly attentive
+            "L": "negative",      # loss/fail
+            "W": "positive",      # win/success
+            "ratio": "negative",  # getting more replies than likes (bad)
+            "boomer": "negative", # old/out of touch
+            "meme": "neutral",    # joke reference
+            "mood": "positive",   # relatable feeling
+            "slay": "positive",   # doing great
+            "toxic": "negative",  # harmful behavior
+            "vibe": "positive",   # feeling/atmosphere
+            "woke": "neutral",    # socially aware
+            "zaddy": "positive",  # attractive older man
+            "bet": "positive",    # agreement/confirmation
+            "bop": "positive",    # good song
+            "fix": "negative",    # intoxicating substance
+            "snatched": "positive", # looking good
+            "receipts": "neutral", # evidence
+            "triggered": "negative", # upset
+            "yikes": "negative",   # expression of dismay
+            "tfw": "neutral",      # that feeling when
+            "mfw": "neutral",      # my face when
+            "otp": "positive"      # one true pair
+        }
+        
+        # Initialize cache for text analysis results
+        self.analysis_cache = {}
+        self.cache_max_size = 1000  # Maximum cache entries
 
         # --- Expanded critical/constructive keywords ---
         self.critical_keywords = [
@@ -292,43 +474,97 @@ class SentimentModel:
         text_lower = text.lower()
         return any(kw in text_lower for kw in positive_crying_keywords)
 
+    def _analyze_context_sensitive_emoji(self, emoji, text):
+        """
+        Analyze context-sensitive emojis based on surrounding text.
+        
+        Args:
+            emoji: The emoji character to analyze
+            text: The full text containing the emoji
+            
+        Returns:
+            String: "positive", "negative", or "neutral" based on context
+        """
+        text_lower = text.lower()
+        
+        # Check if emoji is in our context-sensitive dictionary
+        if emoji in self.context_sensitive_emojis:
+            emoji_info = self.context_sensitive_emojis[emoji]
+            
+            # Check for positive context
+            if any(context in text_lower for context in emoji_info["positive_contexts"]):
+                return "positive"
+                
+            # Check for negative context
+            if any(context in text_lower for context in emoji_info["negative_contexts"]):
+                return "negative"
+                
+            # Default interpretation if no specific context is found
+            return emoji_info["default"]
+        
+        # Return None for emojis not needing special context handling
+        return None
+
     def extract_emojis(self, text):
-        """Extract emojis from text and analyze their sentiment, handling variations and context-aware crying emoji."""
+        """Extract emojis from text and analyze their sentiment with enhanced context analysis."""
         try:
             import emoji
         except ImportError:
             return {"emojis": [], "positive_count": 0, "negative_count": 0, "neutral_count": 0, "sentiment_score": 0}
+            
+        # Check cache first for performance
+        if text in self.analysis_cache and "emoji_analysis" in self.analysis_cache[text]:
+            return self.analysis_cache[text]["emoji_analysis"]
+            
         found_emojis = emoji.emoji_list(text)
         emoji_chars = [item["emoji"] for item in found_emojis]
         normalized_emojis = [self._normalize_emoji(e) for e in emoji_chars]
         positive_count = 0
         negative_count = 0
         neutral_count = 0
+        
         for orig, norm in zip(emoji_chars, normalized_emojis):
-            # Special handling for crying emoji
-            if norm == "😭":
-                if self._is_positive_crying_context(text):
-                    positive_count += 1
-                else:
-                    negative_count += 1
-            else:
-                if hasattr(self, "positive_emojis") and norm in self.positive_emojis:
-                    positive_count += 1
-                elif hasattr(self, "negative_emojis") and norm in self.negative_emojis:
-                    negative_count += 1
-                elif hasattr(self, "neutral_emojis") and norm in self.neutral_emojis:
-                    neutral_count += 1
+            # First check if this is a context-sensitive emoji
+            context_sentiment = self._analyze_context_sensitive_emoji(norm, text)
+            
+            if context_sentiment == "positive":
+                positive_count += 1
+            elif context_sentiment == "negative":
+                negative_count += 1
+            elif context_sentiment == "neutral":
+                neutral_count += 1
+            # If not context-sensitive, use standard emoji lists
+            elif norm in self.positive_emojis:
+                positive_count += 1
+            elif norm in self.negative_emojis:
+                negative_count += 1
+            elif norm in self.neutral_emojis:
+                neutral_count += 1
+        
         emoji_sentiment = 0
         total = positive_count + negative_count + neutral_count
         if total:
             emoji_sentiment = (positive_count - negative_count) / total
-        return {
+        
+        result = {
             "emojis": emoji_chars,
             "positive_count": positive_count,
             "negative_count": negative_count,
             "neutral_count": neutral_count,
             "sentiment_score": emoji_sentiment
         }
+        
+        # Cache the result
+        if text not in self.analysis_cache:
+            self.analysis_cache[text] = {}
+        self.analysis_cache[text]["emoji_analysis"] = result
+        
+        # Manage cache size
+        if len(self.analysis_cache) > self.cache_max_size:
+            # Remove oldest item (assuming dict maintains insertion order in Python 3.7+)
+            self.analysis_cache.pop(next(iter(self.analysis_cache)))
+        
+        return result
 
     def has_negation(self, text):
         """Detect negation phrases that might flip the sentiment."""
@@ -458,7 +694,77 @@ class SentimentModel:
 
     def detect_critical_keywords(self, text):
         """Check if any critical/constructive keywords are in the text."""
-        return any(kw in text for kw in self.critical_keywords)
+        return any(keyword in text for keyword in self.critical_keywords)
+
+    def detect_social_media_abbreviations(self, text):
+        """
+        Detect and analyze social media abbreviations/slang for sentiment implications.
+        
+        Args:
+            text: The text to analyze for social media abbreviations
+            
+        Returns:
+            Dict containing detected abbreviations and their sentiment impact
+        """
+        words = re.findall(r'\b\w+\b', text.lower())
+        
+        # Check for multi-word abbreviations first (like "no cap")
+        multi_word_abbrevs = ["no cap", "low key", "high key", "for real"]
+        
+        found_abbreviations = {}
+        positive_count = 0
+        negative_count = 0
+        neutral_count = 0
+        
+        # Check for multi-word abbreviations in text
+        for abbrev in multi_word_abbrevs:
+            if abbrev in text.lower():
+                sentiment = self.social_media_abbreviations.get(abbrev.replace(" ", ""), "neutral")
+                found_abbreviations[abbrev] = sentiment
+                if sentiment == "positive":
+                    positive_count += 1
+                elif sentiment == "negative":
+                    negative_count += 1
+                else:
+                    neutral_count += 1
+        
+        # Check for single word abbreviations
+        for word in words:
+            if word in self.social_media_abbreviations:
+                sentiment = self.social_media_abbreviations[word]
+                found_abbreviations[word] = sentiment
+                if sentiment == "positive":
+                    positive_count += 1
+                elif sentiment == "negative":
+                    negative_count += 1
+                else:
+                    neutral_count += 1
+        
+        # Calculate overall sentiment impact
+        sentiment_score = 0
+        total = positive_count + negative_count
+        if total > 0:
+            sentiment_score = (positive_count - negative_count) / total
+        
+        result = {
+            "abbreviations": found_abbreviations,
+            "positive_count": positive_count,
+            "negative_count": negative_count,
+            "neutral_count": neutral_count,
+            "sentiment_score": sentiment_score,
+            "has_abbreviations": len(found_abbreviations) > 0
+        }
+        
+        return result
+
+    def detect_hateful_content(self, text):
+        """Detect hateful or offensive language in the text."""
+        hateful_keywords = [
+            "hate", "racist", "sexist", "bigot", "offensive", "slur", "discrimination",
+            "violence", "abuse", "harassment", "intolerant", "prejudice", "xenophobia",
+            "homophobia", "transphobia", "misogyny", "misandry", "hateful"
+        ]
+        return any(keyword in text.lower() for keyword in hateful_keywords)
 
     def predict(self, texts):
         """
@@ -734,13 +1040,554 @@ class SentimentModel:
             if hashtag_info["hashtags"]:
                 print(f"  Hashtag sentiment: {hashtag_sentiment:.2f}")
             if debug_info["features"]:
-                print(f"  Features: {', '.join(debug_info['features'])}")
+                print(f"  Features: {', '.join(debug_info["features"])}")
         
         return predictions
     
     def get_sentiment_label(self, category_index):
         """Get the text label for a sentiment category index."""
         return self.sentiment_categories[category_index]
+
+    def batch_predict(self, texts_list, batch_size=16):
+        """
+        Process multiple texts in efficient batches for improved performance.
+        
+        Args:
+            texts_list: List of strings to analyze
+            batch_size: Number of texts to process in each batch
+            
+        Returns:
+            Dictionary with sentiment predictions and processing statistics
+        """
+        if not texts_list:
+            return {"predictions": [], "processing_time": 0, "texts_processed": 0}
+        
+        import time
+        start_time = time.time()
+        
+        all_predictions = []
+        total_texts = len(texts_list)
+        batches = [texts_list[i:i + batch_size] for i in range(0, total_texts, batch_size)]
+        
+        for batch in batches:
+            # Process each batch
+            batch_predictions = self.predict(batch)
+            all_predictions.extend(batch_predictions)
+        
+        end_time = time.time()
+        processing_time = end_time - start_time
+        
+        results = {
+            "predictions": all_predictions,
+            "prediction_categories": [self.get_sentiment_label(pred) for pred in all_predictions],
+            "processing_time": processing_time,
+            "texts_processed": total_texts,
+            "texts_per_second": total_texts / processing_time if processing_time > 0 else 0
+        }
+        
+        return results
+
+    def analyze_sentiment_trends(self, texts_list, user_info=None, timestamps=None):
+        """
+        Analyze sentiment trends across multiple texts, optionally with timestamps and user context.
+        
+        Args:
+            texts_list: List of strings to analyze
+            user_info: Optional dict with user metadata
+            timestamps: Optional list of datetime objects corresponding to the texts
+            
+        Returns:
+            Dict with trend analysis and aggregate statistics
+        """
+        # First get all sentiment predictions
+        batch_results = self.batch_predict(texts_list)
+        predictions = batch_results["predictions"]
+        
+        if not predictions:
+            return {"error": "No texts to analyze"}
+        
+        # Calculate distribution
+        sentiment_distribution = {i: predictions.count(i) for i in range(5)}
+        total_texts = len(predictions)
+        sentiment_percentages = {
+            self.get_sentiment_label(k): round((v / total_texts) * 100, 1) 
+            for k, v in sentiment_distribution.items()
+        }
+        
+        # Calculate overall sentiment score (-100 to 100 scale)
+        # Weight: overwhelmingly negative = -2, negative = -1, neutral = 0, positive = 1, overwhelmingly positive = 2
+        weights = {0: -2, 1: -1, 2: 0, 3: 1, 4: 2}
+        weighted_sum = sum(weights[pred] * 50 for pred in predictions)  # Scale to -100 to 100
+        overall_score = weighted_sum / total_texts
+        
+        # Detect sentiment shifts (if timestamps provided)
+        sentiment_shifts = []
+        if timestamps and len(timestamps) == len(predictions):
+            # Sort predictions by timestamp
+            sorted_data = sorted(zip(timestamps, predictions))
+            # Look for significant shifts
+            for i in range(1, len(sorted_data)):
+                prev_sentiment = sorted_data[i-1][1]
+                curr_sentiment = sorted_data[i][1]
+                # If sentiment changed by 2 or more levels
+                if abs(curr_sentiment - prev_sentiment) >= 2:
+                    sentiment_shifts.append({
+                        "timestamp": sorted_data[i][0],
+                        "from": self.get_sentiment_label(prev_sentiment),
+                        "to": self.get_sentiment_label(curr_sentiment),
+                        "shift_magnitude": abs(curr_sentiment - prev_sentiment)
+                    })
+        
+        # Get dominant emotion words
+        positive_words = []
+        negative_words = []
+        for text, pred in zip(texts_list, predictions):
+            if pred >= 3:  # Positive or overwhelmingly positive
+                # Extract positive keywords
+                text_lower = text.lower()
+                found_positive = [word for word in self.very_positive_keywords + self.positive_keywords 
+                                 if word in text_lower]
+                positive_words.extend(found_positive)
+            elif pred <= 1:  # Negative or overwhelmingly negative
+                # Extract negative keywords
+                text_lower = text.lower()
+                found_negative = [word for word in self.very_negative_keywords + self.negative_keywords 
+                                 if word in text_lower]
+                negative_words.extend(found_negative)
+        
+        # Count word frequencies
+        from collections import Counter
+        positive_word_counts = Counter(positive_words)
+        negative_word_counts = Counter(negative_words)
+        
+        # Get top words
+        top_positive = positive_word_counts.most_common(5)
+        top_negative = negative_word_counts.most_common(5)
+        
+        # Prepare the analysis results
+        analysis = {
+            "overall_score": overall_score,
+            "sentiment_distribution": {
+                "counts": sentiment_distribution,
+                "percentages": sentiment_percentages
+            },
+            "dominant_sentiment": self.get_sentiment_label(max(sentiment_distribution, key=sentiment_distribution.get)),
+            "sentiment_keywords": {
+                "positive": [{"word": word, "count": count} for word, count in top_positive],
+                "negative": [{"word": word, "count": count} for word, count in top_negative]
+            },
+            "processing_stats": {
+                "texts_processed": total_texts,
+                "processing_time": batch_results["processing_time"],
+                "texts_per_second": batch_results["texts_per_second"]
+            }
+        }
+        
+        # Include sentiment shifts if available
+        if sentiment_shifts:
+            analysis["sentiment_shifts"] = sentiment_shifts
+        
+        return analysis
+
+    def detect_topics(self, texts_list):
+        """
+        Detect common topics or themes across multiple texts using keyword extraction.
+        
+        Args:
+            texts_list: List of strings to analyze
+            
+        Returns:
+            Dict containing detected topics and their frequency
+        """
+        # Topic keywords by domain
+        topic_categories = {
+            "politics": [
+                "government", "election", "vote", "democracy", "president", "minister", 
+                "parliament", "political", "policy", "campaign", "party", "republican", 
+                "democrat", "congress", "senator", "liberal", "conservative", "law", 
+                "legislation", "rights", "freedom"
+            ],
+            "technology": [
+                "tech", "technology", "software", "hardware", "app", "device", "update", 
+                "algorithm", "computer", "smartphone", "digital", "innovation", "ai", "data",
+                "programming", "code", "internet", "mobile", "web", "online", "cyber"
+            ],
+            "entertainment": [
+                "movie", "film", "series", "show", "music", "song", "album", "artist", "actor",
+                "celebrity", "concert", "performance", "streaming", "netflix", "tv", "television",
+                "game", "gaming", "play", "theater", "cinema", "festival", "entertainment"
+            ],
+            "sports": [
+                "game", "team", "player", "win", "lose", "match", "tournament", "championship",
+                "league", "score", "ball", "coach", "stadium", "athlete", "sport", "football",
+                "soccer", "basketball", "baseball", "hockey", "tennis", "golf", "olympics"
+            ],
+            "health": [
+                "health", "medical", "doctor", "hospital", "medication", "treatment", "symptom", 
+                "disease", "diagnosis", "therapy", "mental", "physical", "wellness", "fitness",
+                "exercise", "diet", "nutrition", "healthcare", "vaccine", "pandemic", "virus"
+            ],
+            "business": [
+                "business", "company", "market", "product", "service", "customer", "startup",
+                "investment", "economy", "economic", "stock", "price", "financial", "finance",
+                "money", "profit", "revenue", "sales", "brand", "marketing", "entrepreneur"
+            ],
+            "social_issues": [
+                "social", "community", "society", "issue", "justice", "equality", "inequality",
+                "discrimination", "racism", "sexism", "protest", "movement", "activism", "rights",
+                "gender", "identity", "climate", "environment", "poverty", "education", "reform"
+            ],
+            "personal": [
+                "feel", "feeling", "emotion", "experience", "life", "personal", "self", "myself",
+                "family", "friend", "relationship", "love", "hate", "happy", "sad", "angry", 
+                "excited", "disappointed", "memory", "thought", "belief", "opinion"
+            ]
+        }
+        
+        # Initialize counter for each topic
+        topic_counts = {topic: 0 for topic in topic_categories}
+        
+        # Process each text
+        for text in texts_list:
+            text_lower = text.lower()
+            
+            # Analyze each topic category
+            for topic, keywords in topic_categories.items():
+                # Count how many keywords from this topic appear in the text
+                matches = [keyword for keyword in keywords if keyword in text_lower]
+                if matches:
+                    topic_counts[topic] += 1
+        
+        # Calculate percentages
+        total_texts = len(texts_list)
+        topic_percentages = {}
+        for topic, count in topic_counts.items():
+            if total_texts > 0:
+                topic_percentages[topic] = round((count / total_texts) * 100, 1)
+            else:
+                topic_percentages[topic] = 0
+        
+        # Find specific keywords that appeared most frequently
+        all_keywords = []
+        for topic, keywords in topic_categories.items():
+            for keyword in keywords:
+                # Count occurrences across all texts
+                keyword_count = sum(1 for text in texts_list if keyword in text.lower())
+                if keyword_count > 0:
+                    all_keywords.append((keyword, keyword_count))
+        
+        # Sort and get top keywords
+        all_keywords.sort(key=lambda x: x[1], reverse=True)
+        top_keywords = all_keywords[:10]  # Top 10 keywords
+        
+        # Determine primary and secondary topics
+        sorted_topics = sorted(topic_percentages.items(), key=lambda x: x[1], reverse=True)
+        primary_topics = [topic for topic, percentage in sorted_topics if percentage > 20]
+        secondary_topics = [topic for topic, percentage in sorted_topics if 5 <= percentage <= 20 and topic not in primary_topics]
+        
+        result = {
+            "primary_topics": primary_topics,
+            "secondary_topics": secondary_topics,
+            "topic_percentages": topic_percentages,
+            "top_keywords": [{"keyword": kw, "count": count} for kw, count in top_keywords]
+        }
+        
+        return result
+
+    def prepare_visualization_data(self, texts_list, timestamps=None):
+        """
+        Prepare data structures suitable for sentiment visualization in the browser extension.
+        
+        Args:
+            texts_list: List of strings to analyze
+            timestamps: Optional list of datetime objects corresponding to the texts
+            
+        Returns:
+            Dict with formatted data for visualization (charts, graphs, etc.)
+        """
+        # Get sentiment predictions
+        batch_results = self.batch_predict(texts_list)
+        predictions = batch_results["predictions"]
+        
+        if not predictions:
+            return {"error": "No texts to analyze"}
+        
+        # Basic sentiment distribution for pie/donut chart
+        sentiment_counts = {i: predictions.count(i) for i in range(5)}
+        sentiment_labels = [self.get_sentiment_label(i) for i in range(5)]
+        sentiment_data = {
+            "labels": sentiment_labels,
+            "counts": [sentiment_counts.get(i, 0) for i in range(5)],
+            "colors": [
+                "#e74c3c",  # overwhelmingly negative (red)
+                "#f39c12",  # negative (orange)
+                "#7f8c8d",  # neutral (gray)
+                "#3498db",  # positive (blue)
+                "#2ecc71"   # overwhelmingly positive (green)
+            ]
+        }
+        
+        # Time series data if timestamps are provided
+        time_series_data = None
+        if timestamps and len(timestamps) == len(predictions):
+            # Sort by timestamp
+            time_data = sorted(zip(timestamps, predictions))
+            time_series_data = {
+                "timestamps": [str(t) for t, _ in time_data],
+                "values": [p for _, p in time_data],
+                "labels": [self.get_sentiment_label(p) for _, p in time_data]
+            }
+        
+        # Prepare final visualization data package
+        visualization_data = {
+            "sentiment_distribution": sentiment_data,
+            "processing_stats": {
+                "texts_processed": len(texts_list),
+                "processing_time": batch_results["processing_time"]
+            }
+        }
+        
+        if time_series_data:
+            visualization_data["time_series"] = time_series_data
+        
+        return visualization_data
+
+    def learn_from_feedback(self, text, original_prediction, corrected_prediction, save_feedback=True):
+        """
+        Learn from user feedback on sentiment predictions to improve future analyses.
+        
+        Args:
+            text: The text that was analyzed
+            original_prediction: The original prediction category (0-4)
+            corrected_prediction: The corrected prediction category (0-4) from user
+            save_feedback: Whether to save feedback to disk for future model training
+            
+        Returns:
+            Dict with learning results and improvement suggestions
+        """
+        if original_prediction == corrected_prediction:
+            return {"success": False, "message": "No correction needed, predictions match"}
+        
+        # Extract features from the text
+        text_lower = text.lower()
+        words = text_lower.split()
+        
+        # Analyze what might have caused the misclassification
+        # 1. Check for negations that might have been missed
+        negated = self.has_negation(text_lower)
+        
+        # 2. Check for social media slang
+        slang_info = self.detect_social_media_abbreviations(text_lower)
+        
+        # 3. Check for emojis
+        emoji_info = self.extract_emojis(text)
+        
+        # 4. Check for hashtags
+        hashtag_info = self.extract_hashtags(text_lower)
+        
+        # Determine what type of error occurred (e.g., false positive, false negative)
+        error_type = None
+        if (original_prediction <= 1 and corrected_prediction >= 3) or (original_prediction >= 3 and corrected_prediction <= 1):
+            error_type = "polarity_error"  # Complete polarity reversal
+        elif abs(original_prediction - corrected_prediction) == 1:
+            error_type = "intensity_error"  # Intensity error (e.g., positive vs. very positive)
+        elif original_prediction == 2 and corrected_prediction != 2:
+            error_type = "neutrality_error"  # Incorrectly classified as neutral
+        elif original_prediction != 2 and corrected_prediction == 2:
+            error_type = "sentiment_error"  # Should have been neutral
+        
+        # Create feedback entry
+        feedback_entry = {
+            "text": text,
+            "original_prediction": original_prediction,
+            "corrected_prediction": corrected_prediction,
+            "error_type": error_type,
+            "has_negation": negated,
+            "has_slang": slang_info["has_abbreviations"],
+            "slang_terms": list(slang_info["abbreviations"].keys()) if slang_info["has_abbreviations"] else [],
+            "has_emojis": len(emoji_info["emojis"]) > 0,
+            "emojis": emoji_info["emojis"] if emoji_info["emojis"] else [],
+            "has_hashtags": len(hashtag_info["hashtags"]) > 0,
+            "hashtags": hashtag_info["hashtags"] if hashtag_info["hashtags"] else [],
+            "timestamp": str(datetime.datetime.now())
+        }
+        
+        # Save feedback for future model improvements
+        if save_feedback:
+            feedback_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "feedback")
+            os.makedirs(feedback_dir, exist_ok=True)
+            feedback_file = os.path.join(feedback_dir, "sentiment_feedback.jsonl")
+            
+            with open(feedback_file, "a") as f:
+                f.write(json.dumps(feedback_entry) + "\n")
+        
+        # Generate improvement suggestions
+        suggestions = []
+        
+        if error_type == "polarity_error":
+            if negated:
+                suggestions.append("Consider strengthening negation handling for this type of text")
+            if slang_info["has_abbreviations"]:
+                suggestions.append(f"Update slang dictionary for terms: {', '.join(slang_info['abbreviations'].keys())}")
+            if emoji_info["emojis"]:
+                suggestions.append("Review emoji sentiment assignments")
+        elif error_type == "neutrality_error":
+            suggestions.append("Consider adjusting neutral threshold for similar content")
+            
+        # Update the internal model state (simple version - just add to cache)
+        # For a robust implementation, this would involve online learning or model parameter adjustments
+        if text not in self.analysis_cache:
+            self.analysis_cache[text] = {}
+        self.analysis_cache[text]["corrected_sentiment"] = corrected_prediction
+        
+        return {
+            "success": True,
+            "feedback_saved": save_feedback,
+            "error_type": error_type,
+            "suggestions": suggestions,
+            "feedback_entry": feedback_entry
+        }
+
+    def detect_specific_emotions(self, text):
+        """
+        Detect specific emotions in text beyond just positive/negative sentiment.
+        This helps match appropriate emojis to the detected emotions.
+        
+        Args:
+            text: The text to analyze
+            
+        Returns:
+            Dict with detected emotions and their confidence scores
+        """
+        # Define emotion keywords dictionary
+        emotion_keywords = {
+            "joy": [
+                "happy", "joyful", "delighted", "thrilled", "excited", "ecstatic", "glad", 
+                "pleased", "content", "satisfied", "cheerful", "merry", "jolly", "enjoy",
+                "enjoying", "enjoyed", "fun", "wonderful", "fantastic", "awesome", "amazing",
+                "celebrate", "celebrating", "celebration", "congratulations", "congrats",
+                "love", "lovely", "delightful", "joy", "yay", "hooray", "woohoo", "happiness"
+            ],
+            "sadness": [
+                "sad", "unhappy", "depressed", "depressing", "miserable", "heartbroken", "down",
+                "blue", "gloomy", "somber", "melancholy", "grief", "grieving", "sorrow", "sorry",
+                "regret", "regretful", "disappointed", "disappointing", "upset", "crying", "cry",
+                "tears", "teary", "weeping", "weep", "mourning", "mourn", "hurt", "pain", "painful",
+                "devastated", "devastation", "despair", "despairing", "hopeless", "heartache"
+            ],
+            "anger": [
+                "angry", "mad", "furious", "enraged", "outraged", "irate", "livid", "annoyed",
+                "irritated", "frustrated", "frustrating", "infuriated", "pissed", "fuming", "rage",
+                "raging", "hatred", "hate", "resent", "resentment", "disgusted", "disgusting",
+                "appalled", "appalling", "revolting", "revulsion", "offended", "offensive", "hostile"
+            ],
+            "fear": [
+                "afraid", "scared", "frightened", "terrified", "fear", "fearful", "horrified", 
+                "horror", "panic", "panicked", "anxious", "anxiety", "nervous", "worried", "worry",
+                "dread", "dreading", "alarmed", "alarming", "threatened", "threatening", "threat",
+                "intimidated", "intimidating", "petrified", "terror", "uneasy", "apprehensive"
+            ],
+            "surprise": [
+                "surprised", "shocking", "shocked", "amazed", "astonished", "astounded", "stunned",
+                "startled", "unexpected", "wow", "whoa", "omg", "oh my god", "oh my gosh", "gosh",
+                "unbelievable", "incredible", "remarkable", "extraordinary", "mind-blowing", "speechless"
+            ],
+            "disgust": [
+                "disgusted", "revolted", "repulsed", "gross", "nasty", "yuck", "ew", "eww", "ugh",
+                "sickening", "sickened", "nauseous", "nauseating", "repulsive", "repugnant", "distasteful",
+                "offensive", "foul", "vile", "filthy", "loathsome"
+            ],
+            "appreciation": [
+                "thank", "thanks", "thankful", "grateful", "gratitude", "appreciate", "appreciative",
+                "blessed", "fortunate", "lucky", "honored", "moved", "touching", "touched"
+            ],
+            "amusement": [
+                "funny", "hilarious", "lol", "rofl", "lmao", "lmfao", "haha", "hehe", "amusing",
+                "amused", "laughing", "laugh", "humorous", "humor", "joke", "joking", "witty",
+                "comical", "entertaining", "entertained", "giggle", "giggling", "chuckle"
+            ],
+            "excitement": [
+                "excited", "thrilled", "eager", "enthusiastic", "pumped", "stoked", "psyched",
+                "hyped", "cant wait", "can't wait", "looking forward", "anticipation", "anticipating"
+            ],
+            "love": [
+                "love", "adore", "cherish", "affection", "affectionate", "fond", "devoted", "smitten",
+                "infatuated", "enamored", "romantic", "passion", "passionate", "heart", "hearts",
+                "beloved", "darling", "dear", "sweetheart", "sweetie", "honey", "xoxo"
+            ]
+        }
+        
+        # Initialize emotion scores
+        emotion_scores = {emotion: 0 for emotion in emotion_keywords}
+        text_lower = text.lower()
+        
+        # Check for each emotion's keywords in the text
+        for emotion, keywords in emotion_keywords.items():
+            # Count occurrences of each keyword
+            matches = [keyword for keyword in keywords if keyword in text_lower]
+            # Score is normalized by the number of keywords in the category to avoid bias
+            if matches:
+                # Basic score based on number of matches
+                emotion_scores[emotion] = len(matches) / len(keywords)
+                
+                # Boost score if keywords appear with intensifiers
+                for match in matches:
+                    for intensifier in self.intensifiers:
+                        if f"{intensifier} {match}" in text_lower:
+                            emotion_scores[emotion] += 0.5
+                            break
+        
+        # Check for emojis that represent specific emotions
+        emoji_info = self.extract_emojis(text)
+        
+        # Map emojis to emotions
+        emoji_emotion_map = {
+            "😀": "joy", "😃": "joy", "😄": "joy", "😁": "joy", "😆": "joy", "😅": "joy", "🤣": "joy",
+            "😂": "joy", "🙂": "joy", "😊": "joy", "😍": "love", "🥰": "love", "😘": "love",
+            "😢": "sadness", "😭": "sadness", "😞": "sadness", "😔": "sadness", "😟": "sadness",
+            "😠": "anger", "😡": "anger", "🤬": "anger", "😤": "anger",
+            "😨": "fear", "😱": "fear", "😰": "fear", "😥": "fear",
+            "😲": "surprise", "😯": "surprise", "😮": "surprise", "😦": "surprise",
+            "🤢": "disgust", "🤮": "disgust", "😖": "disgust",
+            "😌": "appreciation", "🙏": "appreciation", "🥹": "appreciation",
+            "😏": "amusement", "😜": "amusement", "😝": "amusement", "😛": "amusement",
+            "🤩": "excitement", "✨": "excitement", "🎉": "excitement", "🎊": "excitement"
+        }
+        
+        # Add emotion scores based on emojis
+        for emoji in emoji_info["emojis"]:
+            normalized_emoji = self._normalize_emoji(emoji)
+            if normalized_emoji in emoji_emotion_map:
+                emotion = emoji_emotion_map[normalized_emoji]
+                emotion_scores[emotion] += 1
+        
+        # Determine primary and secondary emotions
+        sorted_emotions = sorted(emotion_scores.items(), key=lambda x: x[1], reverse=True)
+        
+        # Filter out emotions with zero score
+        valid_emotions = [emotion for emotion, score in sorted_emotions if score > 0]
+        
+        # Get the top two emotions
+        primary_emotion = sorted_emotions[0][0] if sorted_emotions and sorted_emotions[0][1] > 0 else None
+        secondary_emotion = sorted_emotions[1][0] if len(sorted_emotions) > 1 and sorted_emotions[1][1] > 0 else None
+        
+        # Calculate confidence for primary emotion (normalized to 0-100%)
+        primary_confidence = 0
+        if primary_emotion:
+            # Base confidence on the score relative to the sum of all scores
+            total_score = sum(score for _, score in sorted_emotions if score > 0)
+            if total_score > 0:
+                primary_confidence = int(min(100, (sorted_emotions[0][1] / total_score) * 100))
+        
+        result = {
+            "primary_emotion": primary_emotion,
+            "secondary_emotion": secondary_emotion,
+            "primary_confidence": primary_confidence,
+            "all_emotions": {emotion: score for emotion, score in sorted_emotions if score > 0},
+            "valid_emotions": valid_emotions
+        }
+        
+        return result
 
 
 def create_and_test_model():
@@ -858,3 +1705,19 @@ def create_and_test_model():
 
 if __name__ == "__main__":
     create_and_test_model()
+
+# Define the detect_hateful_content function
+def detect_hateful_content(text):
+    hateful_keywords = ["racist", "sexist", "hateful"]
+    for keyword in hateful_keywords:
+        if keyword in text.lower():
+            return True
+    return False
+
+# Define the analyze_sentiment function
+def analyze_sentiment(text):
+    if detect_hateful_content(text):
+        return {"label": "HATEFUL", "score": 1.0}
+
+    # Placeholder for actual sentiment analysis logic
+    return {"label": "NEUTRAL", "score": 0.5}

@@ -52,7 +52,7 @@ def log_request(route, req_data=None, status=None, error=None):
 
 # Load the sentiment analysis model
 try:
-    sentiment_model = joblib.load('model.pkl')
+    sentiment_model = joblib.load(os.path.join(os.path.dirname(__file__), 'model.pkl'))
     print("Sentiment model loaded successfully.")
 except FileNotFoundError:
     try:
@@ -108,7 +108,7 @@ def home():
 
 def get_sentiment_percentage(category_index, raw_score=None):
     """
-    Convert the sentiment category to a percentage value.
+    Convert the sentiment category to a percentage value with improved granularity.
     
     Args:
         category_index: Integer from 0-4 representing sentiment category
@@ -119,10 +119,16 @@ def get_sentiment_percentage(category_index, raw_score=None):
     """
     # If we have a raw score from the model, use it for more precise percentage
     if raw_score is not None:
-        # Scale the raw score (typically 0-1) to a percentage
-        return round(raw_score * 100)
+        # Scale the raw score (typically 0-1) to a percentage with bias correction
+        # This improves the distribution of sentiment percentages to avoid clustering
+        if raw_score < 0.5:
+            # Expand the lower half of the scale (0-0.5) to (0-40)
+            return round(raw_score * 80)
+        else:
+            # Expand the upper half of the scale (0.5-1) to (40-100)
+            return round(40 + (raw_score - 0.5) * 120)
     
-    # Otherwise map categories to percentage ranges
+    # Otherwise use an improved mapping for categories with better granularity
     category_to_percentage = {
         0: 10,   # Overwhelmingly negative: 10%
         1: 30,   # Negative: 30%
@@ -132,6 +138,69 @@ def get_sentiment_percentage(category_index, raw_score=None):
     }
     
     return category_to_percentage.get(category_index, 50)  # Default to 50% if unknown
+
+def get_sentiment_emojis(category_index, sentiment_percentage=None):
+    """
+    Generate appropriate emojis based on sentiment category and intensity.
+    
+    Args:
+        category_index: Integer from 0-4 representing sentiment category
+        sentiment_percentage: Optional percentage value for more granular emoji selection
+        
+    Returns:
+        Dict containing primary and secondary emojis representing the sentiment
+    """
+    # Define emoji mappings for each sentiment category with intensity variations
+    emoji_mappings = {
+        0: {  # Overwhelmingly negative
+            "primary": ["😠", "😡", "🤬", "😤"],
+            "secondary": ["💔", "👎", "🚫", "❌", "😖"]
+        },
+        1: {  # Negative
+            "primary": ["🙁", "😕", "😒", "😞"],
+            "secondary": ["👎", "💢", "🤦", "🙄"]
+        },
+        2: {  # Neutral
+            "primary": ["😐", "🤔", "😶", "🫤"],
+            "secondary": ["⚖️", "🤷", "📊", "📝"]
+        },
+        3: {  # Positive
+            "primary": ["🙂", "😊", "👍", "😀"],
+            "secondary": ["👌", "✅", "💯", "🔆"]
+        },
+        4: {  # Overwhelmingly positive
+            "primary": ["😁", "🤩", "😍", "🥰"],
+            "secondary": ["🎉", "🎊", "⭐", "💖", "🔥"]
+        }
+    }
+    
+    # Default to middle intensity if no percentage provided
+    if sentiment_percentage is None:
+        primary_emoji = emoji_mappings[category_index]["primary"][1]
+        secondary_emoji = emoji_mappings[category_index]["secondary"][1]
+        return {"primary": primary_emoji, "secondary": secondary_emoji}
+    
+    # Use percentage to determine intensity within the category
+    primary_emojis = emoji_mappings[category_index]["primary"]
+    secondary_emojis = emoji_mappings[category_index]["secondary"]
+    
+    # Map percentage to emoji index
+    if category_index in [0, 1]:  # Negative categories
+        # For negative emotions, higher percentage means more intense negative
+        index = min(len(primary_emojis) - 1, int(sentiment_percentage / 25))
+    elif category_index in [3, 4]:  # Positive categories
+        # For positive emotions, higher percentage means more intense positive
+        index = min(len(primary_emojis) - 1, int(sentiment_percentage / 25))
+    else:  # Neutral category
+        # For neutral, extreme percentages (far from 50) mean stronger neutral stance
+        distance_from_center = abs(sentiment_percentage - 50)
+        index = min(len(primary_emojis) - 1, int(distance_from_center / 15))
+    
+    # Select emojis based on calculated index
+    primary_emoji = primary_emojis[index]
+    secondary_emoji = secondary_emojis[min(index, len(secondary_emojis) - 1)]
+    
+    return {"primary": primary_emoji, "secondary": secondary_emoji}
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
@@ -151,6 +220,77 @@ def analyze():
     text = data['text']
     
     try:
+        # Initialize missing attributes if they don't exist
+        # This ensures the model works even if these were missing when it was serialized
+        
+        # Add hashtags attributes if missing
+        if not hasattr(sentiment_model, 'positive_hashtags'):
+            sentiment_model.positive_hashtags = [
+                "love", "happy", "blessed", "grateful", "joy", "beautiful", "amazing", 
+                "awesome", "excited", "wonderful", "success", "inspiration", "goals",
+                "win", "winning", "blessed", "gratitude", "positive", "positivity"
+            ]
+            print("Added missing positive_hashtags attribute to sentiment model")
+            
+        if not hasattr(sentiment_model, 'negative_hashtags'):
+            sentiment_model.negative_hashtags = [
+                "sad", "angry", "upset", "disappointed", "fail", "failure", "hate", 
+                "depressed", "depression", "anxiety", "stressed", "tired", "exhausted",
+                "worried", "heartbroken", "brokenheart", "lonely", "alone", "hurt"
+            ]
+            print("Added missing negative_hashtags attribute to sentiment model")
+            
+        # Add cache attributes if missing
+        if not hasattr(sentiment_model, 'analysis_cache'):
+            sentiment_model.analysis_cache = {}
+            print("Added missing analysis_cache attribute to sentiment model")
+            
+        if not hasattr(sentiment_model, 'cache_max_size'):
+            sentiment_model.cache_max_size = 1000
+            print("Added missing cache_max_size attribute to sentiment model")
+            
+        # Add keyword attributes if missing
+        if not hasattr(sentiment_model, 'mixed_keywords'):
+            sentiment_model.mixed_keywords = [
+                "bittersweet", "mixed feelings", "conflicted", "ambivalent"
+            ]
+            print("Added missing mixed_keywords attribute to sentiment model")
+            
+        # Add emoji-related attributes if missing
+        if not hasattr(sentiment_model, 'positive_emojis'):
+            sentiment_model.positive_emojis = ["😀", "😃", "😄", "😁", "😊", "👍"]
+            print("Added missing positive_emojis attribute to sentiment model")
+            
+        if not hasattr(sentiment_model, 'negative_emojis'):
+            sentiment_model.negative_emojis = ["😞", "😔", "😢", "😭", "👎"]
+            print("Added missing negative_emojis attribute to sentiment model")
+            
+        if not hasattr(sentiment_model, 'neutral_emojis'):
+            sentiment_model.neutral_emojis = ["😐", "😑", "😶"]
+            print("Added missing neutral_emojis attribute to sentiment model")
+            
+        # Add context-sensitive attributes if missing
+        if not hasattr(sentiment_model, 'context_sensitive_emojis'):
+            sentiment_model.context_sensitive_emojis = {}
+            print("Added missing context_sensitive_emojis attribute to sentiment model")
+            
+        # Add critical keywords attribute if missing
+        if not hasattr(sentiment_model, 'critical_keywords'):
+            sentiment_model.critical_keywords = [
+                "constructive", "feedback", "suggest", "recommend", "improvement"
+            ]
+            print("Added missing critical_keywords attribute to sentiment model")
+            
+        # Override detect_critical_keywords method if it references 'kw'
+        def safe_detect_critical_keywords(text):
+            """Check if any critical/constructive keywords are in the text."""
+            if hasattr(sentiment_model, 'critical_keywords'):
+                return any(keyword in text for keyword in sentiment_model.critical_keywords)
+            return False
+            
+        # Replace the original method with our safe version
+        sentiment_model.detect_critical_keywords = safe_detect_critical_keywords
+            
         # Get the sentiment category index (0-4) and corresponding label
         category_index = sentiment_model.predict([text])[0]
         sentiment_label = sentiment_model.get_sentiment_label(category_index)
@@ -170,8 +310,11 @@ def analyze():
         elif sentiment_percentage < 0 or sentiment_percentage > 100:
             sentiment_percentage = max(0, min(100, sentiment_percentage))
 
+        # Get sentiment emojis based on category and percentage
+        sentiment_emojis = get_sentiment_emojis(category_index, sentiment_percentage)
+
         # Add percentage to the label
-        display_label = f"{sentiment_label} ({sentiment_percentage}%)"
+        display_label = f"{sentiment_label} ({sentiment_percentage}%) {sentiment_emojis['primary']} {sentiment_emojis['secondary']}"
 
         # Prepare the response with detailed sentiment information
         response = {
@@ -179,6 +322,7 @@ def analyze():
             "prediction": int(category_index),  # Convert to int for JSON serialization
             "sentiment": display_label,
             "sentiment_percentage": sentiment_percentage,
+            "sentiment_emojis": sentiment_emojis,
             "sentiment_category": {
                 "0": "overwhelmingly negative",
                 "1": "negative",
@@ -266,7 +410,7 @@ def summarize():
         return jsonify({"error": f"An error occurred during summarization: {str(e)}"}), 500
 
 def generate_sentiment_reasoning(text, sentiment_category, sentiment_label):
-    """Generate reasoning for why the text has the assigned sentiment."""
+    """Generate detailed reasoning for why the text has the assigned sentiment."""
     # Convert sentiment category to int if it's a string
     if isinstance(sentiment_category, str):
         try:
@@ -274,36 +418,41 @@ def generate_sentiment_reasoning(text, sentiment_category, sentiment_label):
         except ValueError:
             sentiment_category = 2  # Default to neutral
     
-    # Map of sentiment categories to reasoning templates
+    # Improved reasoning templates with more variation and depth
     reasoning_templates = {
         0: [  # Overwhelmingly negative
-            "The text contains extremely negative language, accusations, and hostile rhetoric.",
-            "There are strong negative statements that indicate severe criticism or anger.",
-            "The content includes aggressive language that expresses deep dissatisfaction."
+            "The text contains extremely negative language with strong accusations or hostile rhetoric that suggests intense disapproval.",
+            "Multiple negative expressions and emotionally charged language indicate severe criticism or anger.",
+            "The content uses aggressive terminology that conveys profound dissatisfaction or outrage.",
+            "Strong negative sentiment markers throughout the text indicate extreme opposition or distress."
         ],
         1: [  # Negative
-            "The language suggests dissatisfaction or disagreement.",
-            "The text contains critical views and negative assessments.",
-            "There are expressions of complaint or disapproval in the content."
+            "The language contains critical terms and phrases that suggest general dissatisfaction.",
+            "Several negative expressions are used to convey disagreement or disappointment.",
+            "The text presents complaints or unfavorable assessments without extreme intensity.",
+            "The content frames the subject in a negative light through subtle criticism."
         ],
         2: [  # Neutral
-            "The text presents information in a balanced or factual manner.",
-            "The content is primarily informative without strong emotional language.",
-            "The statements are presented objectively without clear positive or negative bias."
+            "The text maintains a balanced perspective without strong emotional indicators.",
+            "The content primarily conveys information in a factual manner without clear bias.",
+            "There is an approximately equal balance of positive and negative elements, or absence of both.",
+            "The statements are presented objectively with focus on reporting rather than evaluation."
         ],
         3: [  # Positive
-            "The language includes supportive or approving statements.",
-            "The text expresses satisfaction or agreement with the subject.",
-            "There are positive assessments and constructive views in the content."
+            "The language incorporates supportive terminology and approving statements.",
+            "Several positive expressions are used to convey satisfaction or agreement.",
+            "The text frames subjects in a favorable light without excessive enthusiasm.",
+            "The content shows optimism and constructive perspectives on the discussed topics."
         ],
         4: [  # Overwhelmingly positive
-            "The text contains extremely enthusiastic and celebratory language.",
-            "There are strong expressions of praise, joy, or admiration.",
-            "The content shows passionate approval and very positive sentiments."
+            "The text uses extremely enthusiastic language with strong expressions of admiration or joy.",
+            "Multiple superlatives and celebratory phrases indicate exceptional approval or excitement.",
+            "The content shows passionate support through consistent positive terminology.",
+            "Strong positive sentiment markers throughout the text convey intense appreciation."
         ]
     }
     
-    # Choose a reasoning template based on sentiment category
+    # Select reasoning template based on sentiment category
     if sentiment_category in reasoning_templates:
         templates = reasoning_templates[sentiment_category]
         import random
@@ -311,33 +460,127 @@ def generate_sentiment_reasoning(text, sentiment_category, sentiment_label):
     else:
         reasoning = "The text contains mixed or ambiguous sentiment signals."
     
-    # For social/political content, add more specific analysis
-    political_keywords = ['war', 'soldiers', 'government', 'rights', 'policy', 'election', 'vote', 'democracy', 'freedom']
+    # Enhanced context detection for more specific analysis
+    # Political content
+    political_keywords = ['government', 'election', 'vote', 'democracy', 'political', 'policy', 'president', 
+                         'minister', 'parliament', 'congress', 'senate', 'rights', 'freedom', 'law']
+    
+    # Conflict/war related
+    conflict_keywords = ['war', 'attack', 'military', 'soldiers', 'troops', 'weapon', 'battle', 'fight', 
+                        'conflict', 'violence', 'terrorist', 'terrorism', 'bombing', 'killed']
+    
+    # Economic content
+    economic_keywords = ['economy', 'market', 'stock', 'price', 'inflation', 'economic', 'financial', 
+                        'trade', 'business', 'company', 'investment', 'bank', 'money', 'dollar', 'rupee']
+    
+    # Social issues
+    social_keywords = ['community', 'society', 'social', 'minority', 'discrimination', 'equality', 
+                      'justice', 'reform', 'protest', 'movement', 'rights', 'gender', 'race', 'religion']
+    
+    # Add context-specific reasoning
     if any(keyword in text.lower() for keyword in political_keywords):
         if sentiment_category <= 1:  # Negative sentiments
-            reasoning += " The text discusses political or social issues with critical or concerned tone."
+            reasoning += " The text discusses political issues with a critical or concerned perspective, potentially highlighting governance problems or policy disagreements."
         elif sentiment_category >= 3:  # Positive sentiments
-            reasoning += " The text discusses political or social issues with an optimistic or supportive perspective."
+            reasoning += " The text discusses political topics with an optimistic or supportive tone, possibly endorsing certain policies or leadership actions."
+        else:  # Neutral
+            reasoning += " The text discusses political topics in a balanced manner, presenting information without strong partisan leaning."
+    
+    elif any(keyword in text.lower() for keyword in conflict_keywords):
+        if sentiment_category <= 1:  # Negative sentiments
+            reasoning += " The content references conflict or violence with a tone of concern, criticism, or alarm about the situation."
+        elif sentiment_category >= 3:  # Positive sentiments
+            reasoning += " Despite referencing conflict, the text maintains a hopeful or constructive perspective, possibly focusing on resolution or peace efforts."
+        else:  # Neutral
+            reasoning += " The text references conflict or security issues in a factual reporting style without emotional loading."
+    
+    elif any(keyword in text.lower() for keyword in economic_keywords):
+        if sentiment_category <= 1:  # Negative sentiments
+            reasoning += " The discussion of economic matters takes a pessimistic view, possibly highlighting problems or downturns."
+        elif sentiment_category >= 3:  # Positive sentiments
+            reasoning += " The economic content is framed positively, potentially highlighting growth, opportunity, or recovery."
+        else:  # Neutral
+            reasoning += " Economic information is presented in a factual manner, focusing on data rather than evaluation."
+            
+    elif any(keyword in text.lower() for keyword in social_keywords):
+        if sentiment_category <= 1:  # Negative sentiments
+            reasoning += " The discussion of social issues expresses concern or criticism about societal problems or inequalities."
+        elif sentiment_category >= 3:  # Positive sentiments
+            reasoning += " The social topics are discussed with optimism, possibly focusing on progress, solutions, or community strength."
+        else:  # Neutral
+            reasoning += " Social matters are presented with balanced perspective, acknowledging complexity without strong evaluative stance."
     
     return reasoning
 
 def generate_model_opinion(sentiment_category, sentiment_label):
     """
-    Generate a short opinion statement from the model based on the sentiment category and label.
+    Generate a more nuanced opinion statement from the model based on the sentiment category and label.
+    
+    Args:
+        sentiment_category: Integer category (0-4) or string representation
+        sentiment_label: String label for the sentiment
+        
+    Returns:
+        A contextual opinion about the content
     """
-    opinions = {
+    # Try to get percentage from label if available
+    percentage = None
+    if sentiment_label and "(" in sentiment_label and "%" in sentiment_label:
+        try:
+            percentage = int(sentiment_label.split("(")[1].split("%")[0].strip())
+        except (ValueError, IndexError):
+            pass
+    
+    # Convert category to int if it's a string
+    try:
+        category = int(sentiment_category)
+    except (ValueError, TypeError):
+        category = 2  # Default to neutral
+    
+    # More nuanced opinions with intensity gradations based on percentage
+    if percentage is not None:
+        if category == 0:  # Overwhelmingly negative
+            if percentage < 5:
+                return "This content is extremely negative and contains hostile or alarming language."
+            elif percentage < 15:
+                return "This content is highly negative with strong expressions of criticism or disapproval."
+            else:
+                return "This content is very negative and may evoke strong negative emotions."
+        elif category == 1:  # Negative
+            if percentage < 25:
+                return "This content leans negative with several critical or disapproving elements."
+            else:
+                return "This content is somewhat negative, expressing mild dissatisfaction or concern."
+        elif category == 2:  # Neutral
+            if percentage < 45:
+                return "This content is mostly neutral with slight negative undertones."
+            elif percentage > 55:
+                return "This content is mostly neutral with slight positive undertones."
+            else:
+                return "This content is neutral and presents information without strong emotion."
+        elif category == 3:  # Positive
+            if percentage > 75:
+                return "This content is quite positive, expressing clear satisfaction or approval."
+            else:
+                return "This content leans positive with supportive or optimistic elements."
+        elif category == 4:  # Overwhelmingly positive
+            if percentage > 95:
+                return "This content is extremely positive with enthusiastic or celebratory language."
+            elif percentage > 85:
+                return "This content is highly positive with strong expressions of appreciation or joy."
+            else:
+                return "This content is very positive and conveys strong positive emotions."
+    
+    # Fallback to basic opinions if percentage is not available
+    basic_opinions = {
         0: "This content is highly negative and may evoke strong negative emotions.",
         1: "This content is negative and expresses dissatisfaction or criticism.",
         2: "This content is neutral and presents information without strong emotion.",
         3: "This content is positive and expresses approval or satisfaction.",
         4: "This content is highly positive and conveys strong positive emotions."
     }
-    # Try to use int category, fallback to neutral
-    try:
-        category = int(sentiment_category)
-    except Exception:
-        category = 2
-    return opinions.get(category, "This content is neutral.")
+    
+    return basic_opinions.get(category, "This content is neutral.")
 
 if __name__ == '__main__':
     print("==================================================")
