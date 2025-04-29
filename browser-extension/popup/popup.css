@@ -286,3 +286,67 @@ header {
   border-radius: 4px;
   color: #444;
 }
+
+#sentiment-grade {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-grow: 1;
+  font-size: 48px;
+  padding-right: 16px;
+}
+
+.sentiment-detail {
+  display: flex;
+  margin: 8px 16px 0 16px;
+  padding-bottom: 8px;
+  border-bottom: #d5d5d5 1px solid;
+  gap: 8px;
+}
+
+.sentiment-detail-left {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-width: 32px;
+  gap: 4px;
+}
+
+.sentiment-detail-left img {
+  width: 32px;
+  height: 32px;
+  opacity: 0.8;
+}
+
+.sentiment-detail-name {
+  font-size: large;
+  padding: 1px;
+}
+
+.sentiment-detail-text {
+  font-size: small;
+  color: #666666;
+  padding: 1px;
+}
+
+.sentiment-detail-right {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-width: 92px;
+  gap: 8px;
+}
+
+.sentiment-detail-quantity {
+  font-size: medium;
+  color: #666666;
+  padding: 1px;
+  text-align: right;
+}
+
+.sentiment-detail-color {
+  min-width: 20px;
+  height: 20px;
+  border-radius: 50%;
+}
