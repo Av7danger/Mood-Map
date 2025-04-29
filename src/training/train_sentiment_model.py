@@ -10,6 +10,7 @@ import joblib
 import numpy as np
 from transformers import BertTokenizer, BertModel, DistilBertTokenizer, DistilBertModel
 import pandas as pd  # Add this import for handling CSV files
+from src.utils.logging_utils import setup_logging
 
 # Configure CUDA settings to avoid device-side assert errors
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # Better error reporting
@@ -24,6 +25,9 @@ EPOCHS = 2  # Reduced epochs for faster completion
 USE_SUBSET = True  # Use a subset of data for faster training
 SUBSET_SIZE = 40000  # Number of samples to use (20k per class)
 SAVE_THRESHOLD = 70.0  # Lower threshold for saving model
+
+# Setup logging
+logger = setup_logging("training_logs.log")
 
 class SentimentClassifier(nn.Module):
     """
@@ -214,140 +218,144 @@ def train_model(model, train_data, val_data, device, batch_size=BATCH_SIZE, epoc
     Train the model with batching and progress tracking.
     Optimized for the high accuracy target of 78.09%.
     """
-    # Unpack data
-    train_input_ids, train_attn_mask, train_labels = train_data
-    val_input_ids, val_attn_mask, val_labels = val_data
-    
-    # Create data loaders for batching
-    train_dataset = TensorDataset(train_input_ids, train_attn_mask, train_labels)
-    val_dataset = TensorDataset(val_input_ids, val_attn_mask, val_labels)
-    
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-    
-    # Define loss function and optimizer
-    criterion = nn.CrossEntropyLoss()
-    
-    # Setup optimizer - similar to what worked well for you before
-    if model_type == "bert":
-        # Use different learning rates for different parts of the model
-        # This is common practice when fine-tuning BERT
-        bert_params = list(model.bert.parameters())
-        classifier_params = list(model.classifier.parameters())
+    try:
+        # Unpack data
+        train_input_ids, train_attn_mask, train_labels = train_data
+        val_input_ids, val_attn_mask, val_labels = val_data
         
-        optimizer = optim.AdamW([
-            {'params': bert_params, 'lr': 2e-5},  # Lower learning rate for BERT
-            {'params': classifier_params, 'lr': 1e-4}  # Higher learning rate for classifier
-        ], weight_decay=0.01)
-    else:
-        # Simpler optimizer setup for DistilBERT (all classifier parameters)
-        optimizer = optim.AdamW(model.parameters(), lr=5e-5, weight_decay=0.01)
-    
-    # Add learning rate scheduler - cosine schedule with warmup
-    # This often produces better results than ReduceLROnPlateau
-    total_steps = len(train_loader) * epochs
-    warmup_steps = int(total_steps * 0.1)  # 10% of total steps for warmup
-    
-    def lr_lambda(current_step):
-        # Linear warmup followed by cosine decay
-        if current_step < warmup_steps:
-            return float(current_step) / float(max(1, warmup_steps))
-        progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
-        return max(0.0, 0.5 * (1.0 + np.cos(np.pi * progress)))
-    
-    scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-    
-    # Track best model
-    best_accuracy = 0.0
-    best_model_state = None
-    
-    # Training loop
-    for epoch in range(epochs):
-        model.train()
-        running_loss = 0.0
-        start_time = time.time()
+        # Create data loaders for batching
+        train_dataset = TensorDataset(train_input_ids, train_attn_mask, train_labels)
+        val_dataset = TensorDataset(val_input_ids, val_attn_mask, val_labels)
         
-        # Training
-        for i, (input_ids, attn_mask, targets) in enumerate(train_loader):
-            # Zero the parameter gradients
-            optimizer.zero_grad()
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+        
+        # Define loss function and optimizer
+        criterion = nn.CrossEntropyLoss()
+        
+        # Setup optimizer - similar to what worked well for you before
+        if model_type == "bert":
+            # Use different learning rates for different parts of the model
+            # This is common practice when fine-tuning BERT
+            bert_params = list(model.bert.parameters())
+            classifier_params = list(model.classifier.parameters())
             
-            # Forward pass
-            outputs = model(input_ids, attn_mask)
-            loss = criterion(outputs, targets)
+            optimizer = optim.AdamW([
+                {'params': bert_params, 'lr': 2e-5},  # Lower learning rate for BERT
+                {'params': classifier_params, 'lr': 1e-4}  # Higher learning rate for classifier
+            ], weight_decay=0.01)
+        else:
+            # Simpler optimizer setup for DistilBERT (all classifier parameters)
+            optimizer = optim.AdamW(model.parameters(), lr=5e-5, weight_decay=0.01)
+        
+        # Add learning rate scheduler - cosine schedule with warmup
+        # This often produces better results than ReduceLROnPlateau
+        total_steps = len(train_loader) * epochs
+        warmup_steps = int(total_steps * 0.1)  # 10% of total steps for warmup
+        
+        def lr_lambda(current_step):
+            # Linear warmup followed by cosine decay
+            if current_step < warmup_steps:
+                return float(current_step) / float(max(1, warmup_steps))
+            progress = float(current_step - warmup_steps) / float(max(1, total_steps - warmup_steps))
+            return max(0.0, 0.5 * (1.0 + np.cos(np.pi * progress)))
+        
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+        
+        # Track best model
+        best_accuracy = 0.0
+        best_model_state = None
+        
+        # Training loop
+        for epoch in range(epochs):
+            model.train()
+            running_loss = 0.0
+            start_time = time.time()
             
-            # Backward pass and optimize
-            loss.backward()
-            
-            # Gradient clipping to prevent exploding gradients
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            
-            optimizer.step()
-            scheduler.step()  # Update learning rate schedule
-            
-            # Print statistics
-            running_loss += loss.item()
-            if i % 10 == 9:  # Print every 10 mini-batches
-                print(f'Epoch {epoch + 1}, Batch {i + 1}/{len(train_loader)}: Loss = {running_loss / 10:.4f}, LR = {scheduler.get_last_lr()[0]:.2e}')
-                running_loss = 0.0
+            # Training
+            for i, (input_ids, attn_mask, targets) in enumerate(train_loader):
+                # Zero the parameter gradients
+                optimizer.zero_grad()
                 
-                # Clear GPU cache periodically
-                if device.type == 'cuda':
-                    torch.cuda.empty_cache()
-        
-        # Validation
-        model.eval()
-        correct = 0
-        total = 0
-        val_loss = 0.0
-        all_predictions = []
-        all_targets = []
-        
-        with torch.no_grad():
-            for input_ids, attn_mask, targets in val_loader:
+                # Forward pass
                 outputs = model(input_ids, attn_mask)
-                _, predicted = torch.max(outputs.data, 1)
-                total += targets.size(0)
-                correct += (predicted == targets).sum().item()
-                
-                # Store predictions and targets for detailed metrics
-                all_predictions.extend(predicted.cpu().numpy())
-                all_targets.extend(targets.cpu().numpy())
-                
-                # Calculate validation loss
                 loss = criterion(outputs, targets)
-                val_loss += loss.item()
+                
+                # Backward pass and optimize
+                loss.backward()
+                
+                # Gradient clipping to prevent exploding gradients
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                
+                optimizer.step()
+                scheduler.step()  # Update learning rate schedule
+                
+                # Print statistics
+                running_loss += loss.item()
+                if i % 10 == 9:  # Print every 10 mini-batches
+                    print(f'Epoch {epoch + 1}, Batch {i + 1}/{len(train_loader)}: Loss = {running_loss / 10:.4f}, LR = {scheduler.get_last_lr()[0]:.2e}')
+                    running_loss = 0.0
+                    
+                    # Clear GPU cache periodically
+                    if device.type == 'cuda':
+                        torch.cuda.empty_cache()
+            
+            # Validation
+            model.eval()
+            correct = 0
+            total = 0
+            val_loss = 0.0
+            all_predictions = []
+            all_targets = []
+            
+            with torch.no_grad():
+                for input_ids, attn_mask, targets in val_loader:
+                    outputs = model(input_ids, attn_mask)
+                    _, predicted = torch.max(outputs.data, 1)
+                    total += targets.size(0)
+                    correct += (predicted == targets).sum().item()
+                    
+                    # Store predictions and targets for detailed metrics
+                    all_predictions.extend(predicted.cpu().numpy())
+                    all_targets.extend(targets.cpu().numpy())
+                    
+                    # Calculate validation loss
+                    loss = criterion(outputs, targets)
+                    val_loss += loss.item()
+            
+            # Calculate metrics
+            epoch_time = time.time() - start_time
+            accuracy = 100 * correct / total
+            avg_val_loss = val_loss / len(val_loader)
+            
+            print(f'Epoch {epoch + 1} completed in {epoch_time:.2f}s')
+            print(f'Validation Accuracy: {accuracy:.2f}%, Loss: {avg_val_loss:.4f}')
+            
+            # Calculate per-class metrics
+            np_preds = np.array(all_predictions)
+            np_targets = np.array(all_targets)
+            for class_id in range(2):
+                class_mask = (np_targets == class_id)
+                if np.sum(class_mask) > 0:
+                    class_correct = np.sum((np_preds == class_id) & class_mask)
+                    class_total = np.sum(class_mask)
+                    print(f"  Class {class_id}: {class_correct}/{class_total} = {100*class_correct/class_total:.2f}%")
+            
+            # Save best model
+            if accuracy > best_accuracy:
+                best_accuracy = accuracy
+                best_model_state = model.state_dict().copy()
+                print(f"New best model saved with accuracy: {best_accuracy:.2f}%")
         
-        # Calculate metrics
-        epoch_time = time.time() - start_time
-        accuracy = 100 * correct / total
-        avg_val_loss = val_loss / len(val_loader)
+        # Load best model state
+        if best_model_state:
+            model.load_state_dict(best_model_state)
+            print(f"Restored best model with validation accuracy: {best_accuracy:.2f}%")
         
-        print(f'Epoch {epoch + 1} completed in {epoch_time:.2f}s')
-        print(f'Validation Accuracy: {accuracy:.2f}%, Loss: {avg_val_loss:.4f}')
-        
-        # Calculate per-class metrics
-        np_preds = np.array(all_predictions)
-        np_targets = np.array(all_targets)
-        for class_id in range(2):
-            class_mask = (np_targets == class_id)
-            if np.sum(class_mask) > 0:
-                class_correct = np.sum((np_preds == class_id) & class_mask)
-                class_total = np.sum(class_mask)
-                print(f"  Class {class_id}: {class_correct}/{class_total} = {100*class_correct/class_total:.2f}%")
-        
-        # Save best model
-        if accuracy > best_accuracy:
-            best_accuracy = accuracy
-            best_model_state = model.state_dict().copy()
-            print(f"New best model saved with accuracy: {best_accuracy:.2f}%")
-    
-    # Load best model state
-    if best_model_state:
-        model.load_state_dict(best_model_state)
-        print(f"Restored best model with validation accuracy: {best_accuracy:.2f}%")
-    
-    return model, best_accuracy
+        logger.info("Model training completed successfully.")
+        return model, best_accuracy
+    except Exception as e:
+        logger.error(f"Error during model training: {e}")
 
 def save_model(model, model_type=MODEL_TYPE, output_path='model.pkl'):
     """Save the trained model for application use."""

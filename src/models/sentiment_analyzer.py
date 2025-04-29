@@ -1,26 +1,35 @@
 import joblib
 import torch
-from transformers import pipeline
+from transformers import pipeline, DistilBertForSequenceClassification, BertForSequenceClassification
 import numpy as np
 import re
 import datetime
 import os
 import json
+from src.utils.logging_utils import setup_logging
+
+# Setup logging
+logger = setup_logging("model_logs.log")
 
 class SentimentModel:
     """A wrapper around Hugging Face's sentiment analysis pipeline for nuanced sentiment analysis."""
     
-    def __init__(self):
+    def __init__(self, model_type="distilbert"):
         """Initialize the sentiment analyzer using a pre-trained model."""
         # Use a model specifically fine-tuned for sentiment analysis
-        model_name = "distilbert-base-uncased-finetuned-sst-2-english"
+        if model_type == "distilbert":
+            self.model = DistilBertForSequenceClassification.from_pretrained("distilbert-base-uncased")
+        elif model_type == "bert-base":
+            self.model = BertForSequenceClassification.from_pretrained("bert-base-uncased")
+        else:
+            raise ValueError("Invalid model type. Choose 'distilbert' or 'bert-base'.")
         
         # Try to use CUDA if available
         device = 0 if torch.cuda.is_available() else -1
         print(f"Device set to use {'cuda:' + str(device) if device >= 0 else 'CPU'}")
         
         # Create the sentiment analysis pipeline
-        self.analyzer = pipeline("sentiment-analysis", model=model_name, device=device)
+        self.analyzer = pipeline("sentiment-analysis", model=self.model, device=device)
         
         # Define the sentiment categories
         self.sentiment_categories = [
@@ -1716,8 +1725,14 @@ def detect_hateful_content(text):
 
 # Define the analyze_sentiment function
 def analyze_sentiment(text):
-    if detect_hateful_content(text):
-        return {"label": "HATEFUL", "score": 1.0}
+    try:
+        if detect_hateful_content(text):
+            return {"label": "HATEFUL", "score": 1.0}
 
-    # Placeholder for actual sentiment analysis logic
-    return {"label": "NEUTRAL", "score": 0.5}
+        # Placeholder for actual sentiment analysis logic
+        result = {"label": "NEUTRAL", "score": 0.5}
+        logger.info(f"Sentiment analysis completed for text: {text}")
+        return result
+    except Exception as e:
+        logger.error(f"Error during sentiment analysis: {e}")
+        raise

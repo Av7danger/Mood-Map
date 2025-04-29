@@ -229,3 +229,27 @@ __pycache__/
 browser-extension/lib/
 browser-extension/coverage/
 browser-extension/dist/
+
+# Configuration files
+fetch_tweets_config.json
+sentiment_api_config.json
+
+# Exclude compiled Python files
+__pycache__/
+*.pyc
+
+# Exclude logs
+backend/logs/
+
+# Exclude model cache
+backend/model_cache/
+
+# Exclude results and checkpoints
+results/
+results/checkpoint-500/
+
+# Exclude temporary files
+*.log
+*.safetensors
+*.pth
+*.bin

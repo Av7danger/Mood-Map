@@ -12,6 +12,9 @@ fake-useragent==1.2.0
 Flask==2.0.3
 Flask-Cors==3.0.10
 
+# Logging and validation
+jsonschema==4.4.0
+
 # Testing and linting
 pytest==7.1.2
 pytest-cov==3.0.0

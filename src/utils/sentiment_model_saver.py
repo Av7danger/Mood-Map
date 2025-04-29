@@ -2,6 +2,10 @@ import torch
 import torch.nn as nn
 import joblib
 from transformers import DistilBertTokenizer, DistilBertModel
+from src.utils.logging_utils import setup_logging
+
+# Setup logging
+logger = setup_logging("model_saver_logs.log")
 
 # Define the model architecture to match what was used in training
 class SentimentClassifier(nn.Module):
@@ -63,6 +67,14 @@ class SentimentAnalysisModelWrapper:
         # Convert to list
         return predictions.tolist()
 
+def save_model(model, path):
+    try:
+        joblib.dump(model, path)
+        logger.info(f"Model saved successfully at {path}.")
+    except Exception as e:
+        logger.error(f"Error saving model: {e}")
+        raise
+
 def create_and_save_model(output_path="model.pkl"):
     """Create a new model instance and save it to disk for the application."""
     print(f"Creating a sentiment analysis model...")
@@ -75,7 +87,7 @@ def create_and_save_model(output_path="model.pkl"):
     
     # Save using joblib
     try:
-        joblib.dump(wrapper_model, output_path)
+        save_model(wrapper_model, output_path)
         print(f"Model successfully saved to {output_path}")
         
         # Test the saved model
