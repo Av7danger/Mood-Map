@@ -46,6 +46,14 @@
   overflow-x: hidden;
   overflow-y: scroll; /* Ensure scrolling is enabled */
   scrollbar-width: none; /* For Firefox */
+  overflow: hidden; /* Fallback for unsupported browsers */
+  -webkit-overflow-scrolling: touch; /* Smooth scrolling for WebKit-based browsers */
+  overflow: hidden; /* Fallback for unsupported browsers */
+  overflow: hidden; /* Fallback for unsupported browsers */
+  overflow: hidden; /* Fallback for unsupported browsers */
+  -ms-overflow-style: none; /* For Internet Explorer and Edge */
+  overflow: hidden; /* Fallback for unsupported browsers */
+  -ms-overflow-style: none; /* For Internet Explorer and Edge */
 }
 
 #product-body::-webkit-scrollbar {

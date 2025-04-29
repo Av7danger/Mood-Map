@@ -1,0 +1,29 @@
+{
+  "extends": [
+    "development",
+    "accessibility",
+    "performance"
+  ],
+  "hints": {
+    "compat-api/css": [
+      "default",
+      {
+        "ignore": [
+          "scrollbar-width",
+          "-webkit-scrollbar"
+        ]
+      }
+    ],
+    "image-optimization": "error",
+    "meta-viewport": "warning",
+    "axe/accessibility": "error",
+    "http-compression": "warning"
+  },
+  "connector": {
+    "name": "puppeteer",
+    "options": {
+      "waitUntil": "networkidle0",
+      "headless": true
+    }
+  }
+}

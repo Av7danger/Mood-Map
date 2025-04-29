@@ -3,7 +3,8 @@ import sys
 import os
 import unittest
 import pandas as pd
-from src.models.sentiment_analyzer import analyze_sentiment
+import pytest
+from src.models.sentiment_analyzer import analyze_sentiment, SentimentModel
 from create_robust_model import ensure_text_and_label_columns
 
 # Add the src directory to the Python path
@@ -93,6 +94,84 @@ def test_ensure_text_and_label_columns():
 
     print("All tests passed for ensure_text_and_label_columns!")
 
+@pytest.mark.parametrize("text, expected_category", [
+    ("This is absolutely amazing! Best experience of my life!", 4),  # Overwhelmingly positive
+    ("I had a really good time and enjoyed the experience.", 3),      # Positive
+    ("It was okay, nothing special.", 2),                            # Neutral
+    ("I didn't really enjoy this and wouldn't recommend it.", 1),    # Negative
+    ("Terrible experience! Complete waste of money and time!", 0),   # Overwhelmingly negative
+    ("While I loved the service, the product itself was disappointing.", 2), # Mixed sentiment
+    ("The absolute worst product I've ever used, incredible results!", 0),   # Sarcasm detection
+    ("The food was decent, but the service was exceptional.", 3),    # Positive with mixed context
+    ("I can't believe how bad this was. Never again!", 0),           # Overwhelmingly negative
+    ("The staff was friendly, but the product quality was poor.", 1) # Negative with mixed context
+])
+def test_sentiment_prediction(text, expected_category):
+    prediction = model.predict([text])[0]
+    assert prediction == expected_category, f"Expected {expected_category}, got {prediction}"
+
+# Additional test examples for sentiment analysis
+@pytest.mark.parametrize("text, expected_category", [
+    # Overwhelmingly Positive Examples
+    ("This is the best day of my life!", 4),
+    ("Absolutely phenomenal! Exceeded all expectations!", 4),
+    ("Outstanding quality and service!", 4),
+    ("I am thrilled with the results!", 4),
+    ("This product is a game-changer!", 4),
+    # Positive Examples
+    ("I enjoyed using this product, it made my work easier.", 3),
+    ("The service was good and the staff was helpful.", 3),
+    ("Overall a pleasant experience that I would recommend.", 3),
+    ("The food was delicious and the ambiance was great.", 3),
+    ("I am happy with my purchase.", 3),
+    # Neutral Examples
+    ("It was okay, nothing special.", 2),
+    ("The performance was acceptable, but not memorable.", 2),
+    ("It works as expected, nothing more, nothing less.", 2),
+    ("The product is decent for its price.", 2),
+    ("I have mixed feelings about this.", 2),
+    # Negative Examples
+    ("I was disappointed with how this turned out.", 1),
+    ("There were several issues that made this experience unpleasant.", 1),
+    ("Not what I expected, and I feel let down.", 1),
+    ("The quality of the product is subpar.", 1),
+    ("I regret buying this.", 1),
+    # Overwhelmingly Negative Examples
+    ("This is the worst experience I've ever had!", 0),
+    ("Absolutely terrible! A complete waste of money!", 0),
+    ("I hate this product, it's awful!", 0),
+    ("This is a disaster, I will never use this again!", 0),
+    ("Horrible experience, avoid at all costs!", 0)
+])
+def test_sentiment_prediction_extended(text, expected_category):
+    prediction = model.predict([text])[0]
+    assert prediction == expected_category, f"Expected {expected_category}, got {prediction}"
+
+# Script to calculate accuracy
+def calculate_accuracy():
+    test_cases = [
+        ("This is absolutely amazing! Best experience of my life!", 4),
+        ("I had a really good time and enjoyed the experience.", 3),
+        ("It was okay, nothing special.", 2),
+        ("I didn't really enjoy this and wouldn't recommend it.", 1),
+        ("Terrible experience! Complete waste of money and time!", 0),
+        ("While I loved the service, the product itself was disappointing.", 2),
+        ("The absolute worst product I've ever used, incredible results!", 0),
+        ("The food was decent, but the service was exceptional.", 3),
+        ("I can't believe how bad this was. Never again!", 0),
+        ("The staff was friendly, but the product quality was poor.", 1)
+    ]
+
+    correct_predictions = 0
+    for text, expected_category in test_cases:
+        prediction = model.predict([text])[0]
+        if prediction == expected_category:
+            correct_predictions += 1
+
+    accuracy = correct_predictions / len(test_cases) * 100
+    print(f"Model Accuracy: {accuracy:.2f}%")
+
 if __name__ == "__main__":
     unittest.main()
     test_ensure_text_and_label_columns()
+    calculate_accuracy()

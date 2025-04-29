@@ -196,3 +196,36 @@ browser-extension/dist/
 /results/
 backend/model.pkl
 data/raw/training.1600000.processed.noemoticon.csv
+
+# Ignore the following file
+presentation_instructions.txt
+
+# Ignore the following file
+run_commands.txt
+
+# Prevent large files from being added to the repository
+*.safetensors
+*.pth
+*.bin
+*.csv
+*.log
+*.json
+
+# Ignore specific directories
+model_cache/
+logs/
+data/processed/
+data/raw/
+results/
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore compiled Python files
+__pycache__/
+*.pyc
+
+# Ignore browser extension build artifacts
+browser-extension/lib/
+browser-extension/coverage/
+browser-extension/dist/
