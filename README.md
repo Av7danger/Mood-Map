@@ -14,10 +14,10 @@ The extension dynamically captures post content from supported platforms, secure
 
 - **Backend:**  
   - Flask (Python) for API development
-    
+
 - **Machine Learning Model:**  
-  - Custom-trained NLP model  (BERT)  
-  - Scikit-learn
+  - Hugging Face Transformers (BERT, DistilBERT, BART)
+  - PyTorch for model training and inference
 
 - **Deployment & Tools:**  
   - RESTful APIs for communication between extension and server  
@@ -49,23 +49,66 @@ The extension dynamically captures post content from supported platforms, secure
 
 ## 🛠 Installation
 
-1. Clone the repository:
+### Prerequisites
+- **Python 3.8+** installed on your system.
+- **Google Chrome** browser.
+- **Node.js** and **npm** (for managing frontend dependencies).
+
+### Steps
+
+1. **Clone the repository:**
    ```bash
    git clone https://github.com/Av7danger/mood-map-extension.git
    ```
 
-2. Navigate to the project directory:
+2. **Navigate to the project directory:**
    ```bash
    cd mood-map-extension
    ```
 
-3. Load the extension in Chrome:
+3. **Install Python dependencies:**
+   - Navigate to the backend directory:
+     ```bash
+     cd backend
+     ```
+   - Install required Python packages:
+     ```bash
+     pip install -r requirements.txt
+     ```
+
+4. **Load the Chrome extension:**
    - Open Chrome and navigate to `chrome://extensions/`.
    - Enable **Developer mode** (toggle in the top-right corner).
-   - Click **Load unpacked** and select the `mood-map-extension` folder.
+   - Click **Load unpacked** and select the `browser-extension` folder.
 
-4. Start the backend server (if applicable):
-   - Navigate to the backend directory and follow its setup instructions.
+5. **Start the backend server:**
+   - Navigate to the backend directory (if not already there):
+     ```bash
+     cd backend
+     ```
+   - Run the Flask server:
+     ```bash
+     python sentiment_api.py
+     ```
+
+6. **Verify the setup:**
+   - Open a browser and navigate to `http://127.0.0.1:5000/` to ensure the backend is running.
+   - Use the extension on supported social media platforms to see sentiment analysis in action.
+
+## ✨ Features
+
+- **Real-time Sentiment Analysis:**
+  - Analyze social media posts dynamically as you browse.
+- **Custom AI Model:**
+  - Leverages a fine-tuned BERT model for accurate sentiment predictions.
+- **User-Friendly Interface:**
+  - Chrome extension with a popup for quick settings and insights.
+- **Backend API:**
+  - Flask-powered RESTful API for efficient communication.
+- **Scalable Design:**
+  - Supports large-scale data processing with low latency.
+- **Privacy-Focused:**
+  - Processes data locally or securely transmits it to the backend.
 
 ## 📖 Usage
 
