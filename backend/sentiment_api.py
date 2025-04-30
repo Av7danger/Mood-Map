@@ -6,15 +6,21 @@ import os
 import torch
 import datetime
 import json
+import logging
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
+
+# Fix the import paths by properly adding the parent directory to sys.path
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(parent_dir)
+
+# Now import from src after fixing the path
 from src.utils.input_validation import validate_input
 from src.models.sentiment_analyzer import analyze_sentiment
-import logging
 
 # Add the src/models directory to the path to import from sentiment_analyzer
-parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(parent_dir, 'src', 'models'))
 from sentiment_analyzer import SentimentModel
+from src.training.train_sentiment_model import SentimentClassifier
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -61,8 +67,31 @@ def log_request(route, req_data=None, status=None, error=None):
         f.write(f"{json.dumps(log_entry)}\n")
 
 # Load configuration
-with open("sentiment_api_config.json", "r") as config_file:
-    config = json.load(config_file)
+config_path = os.path.join(os.path.dirname(__file__), "sentiment_api_config.json")
+if not os.path.exists(config_path):
+    # Try to copy from config directory if not found in backend
+    src_config = os.path.join(parent_dir, "config", "sentiment_api_config.json")
+    if os.path.exists(src_config):
+        import shutil
+        print(f"Copying config from {src_config} to {config_path}")
+        shutil.copy2(src_config, config_path)
+    else:
+        print("Warning: Could not find sentiment_api_config.json. Using default configuration.")
+        config = {
+            "positive_keywords": ["love", "happy", "great", "excellent", "good", "best", "amazing"],
+            "negative_keywords": ["hate", "bad", "terrible", "awful", "worst", "horrible", "disappointing"]
+        }
+
+if os.path.exists(config_path):
+    with open(config_path, "r") as config_file:
+        config = json.load(config_file)
+    print("Configuration loaded successfully.")
+else:
+    print("Using default configuration.")
+    config = {
+        "positive_keywords": ["love", "happy", "great", "excellent", "good", "best", "amazing"],
+        "negative_keywords": ["hate", "bad", "terrible", "awful", "worst", "horrible", "disappointing"]
+    }
 
 # Load the sentiment analysis model
 try:
@@ -614,14 +643,64 @@ def sentiment_analysis():
         return jsonify({"error": "Internal server error."}), 500
 
 if __name__ == "__main__":
-    print("==================================================")
-    print("Mood Map API Server Starting")
-    print("Request logging enabled - monitoring for extension requests")
-    print("==================================================")
+    print("\n" + "=" * 80)
+    print(" MOOD MAP API SERVER ".center(80, "="))
+    print("=" * 80)
+    print("\n📋 Request logging enabled - monitoring for extension requests")
+    
+    # Load models and configuration
+    print("\n🔍 Checking sentiment model...")
+    if sentiment_model:
+        print("✅ Sentiment model loaded successfully!")
+    else:
+        print("❌ ERROR: Sentiment model could not be loaded. API will not work properly.")
     
     # Preload the summarization model at startup for faster first request
-    print("Preloading summarization model...")
+    print("\n🔍 Loading summarization model...")
     load_summarization_model()
     
-    # Start the server
-    app.run(ssl_context=("cert.pem", "key.pem"))  # Enable HTTPS
+    # Check if SSL certificate files exist
+    cert_path = os.path.join(os.path.dirname(__file__), "cert.pem")
+    key_path = os.path.join(os.path.dirname(__file__), "key.pem")
+    
+    print("\n🔍 Checking SSL certificates...")
+    if os.path.exists(cert_path) and os.path.exists(key_path):
+        print("✅ Found SSL certificates, starting server with HTTPS")
+        try:
+            print("\n" + "*" * 80)
+            print(" STARTING SERVER - HTTPS MODE ".center(80, "*"))
+            print("*" * 80)
+            print("\n🚀 Server starting at https://localhost:5000")
+            print("📢 IMPORTANT: The server is now running! Press Ctrl+C to stop.")
+            print("🌐 Access the API at: https://localhost:5000")
+            print("\n" + "*" * 80 + "\n")
+            app.run(ssl_context=(cert_path, key_path))
+        except Exception as e:
+            print(f"\n❌ ERROR: Failed to start server with HTTPS: {e}")
+            print("⚠️ Attempting to start with HTTP instead...")
+            try:
+                print("\n" + "*" * 80)
+                print(" STARTING SERVER - HTTP MODE (FALLBACK) ".center(80, "*"))
+                print("*" * 80)
+                print("\n🚀 Server starting at http://localhost:5000")
+                print("📢 IMPORTANT: The server is now running! Press Ctrl+C to stop.")
+                print("🌐 Access the API at: http://localhost:5000")
+                print("\n" + "*" * 80 + "\n")
+                app.run(host="0.0.0.0", port=5000)
+            except Exception as e2:
+                print(f"\n❌ CRITICAL ERROR: Could not start server: {e2}")
+    else:
+        print("⚠️ SSL certificates not found, starting server with HTTP only")
+        try:
+            print("\n" + "*" * 80)
+            print(" STARTING SERVER - HTTP MODE ".center(80, "*"))
+            print("*" * 80)
+            print("\n🚀 Server starting at http://localhost:5000")
+            print("📢 IMPORTANT: The server is now running! Press Ctrl+C to stop.")
+            print("🌐 Access the API at: http://localhost:5000")
+            print("\n" + "*" * 80 + "\n")
+            app.run(host="0.0.0.0", port=5000)
+        except Exception as e:
+            print(f"\n❌ CRITICAL ERROR: Could not start server: {e}")
+            print("⛔ The server failed to start. Please check the errors above.")
+            sys.exit(1)
