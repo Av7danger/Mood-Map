@@ -20,11 +20,11 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"  # Reduce memory
 MODEL_TYPE = "distilbert"  # Switching to DistilBERT for much faster training
 
 # Fast training configs
-BATCH_SIZE = 32  # Larger batch size for faster iteration
-EPOCHS = 2  # Reduced epochs for faster completion
-USE_SUBSET = True  # Use a subset of data for faster training
-SUBSET_SIZE = 40000  # Number of samples to use (20k per class)
-SAVE_THRESHOLD = 70.0  # Lower threshold for saving model
+BATCH_SIZE = 16  # Smaller batch size for small datasets
+EPOCHS = 20  # More epochs for better convergence with small datasets
+USE_SUBSET = True
+SUBSET_SIZE = 40000
+SAVE_THRESHOLD = 40.0  # Lowered threshold to ensure we get a model
 
 # Setup logging
 logger = setup_logging("training_logs.log")
@@ -109,55 +109,76 @@ def prepare_data(processed_data_path, device, model_type=MODEL_TYPE):
     """Load preprocessed data and prepare for training."""
     print(f"Loading preprocessed data from {processed_data_path}...")
     try:
-        data = torch.load(processed_data_path)
+        # Add BatchEncoding to safe globals to fix the serialization issue
+        import torch.serialization
+        from transformers.tokenization_utils_base import BatchEncoding
+        torch.serialization.add_safe_globals([BatchEncoding])
+        
+        # Now load the data with weights_only=False to allow loading BatchEncoding objects
+        data = torch.load(processed_data_path, weights_only=False)
+        
         encodings, labels = data['encodings'], data['labels']
         
-        # Map the Twitter sentiment labels (0=negative, 4=positive) to binary (0, 1)
-        label_mapping = {0: 0, 4: 1}
-        labels_cpu = labels.cpu().numpy()
-        labels_mapped = torch.tensor([label_mapping.get(int(label), 0) for label in labels_cpu], 
-                                  dtype=torch.long)
+        # Check class distribution
+        class_counts = torch.bincount(labels)
+        print(f"Raw class distribution: {class_counts}")
         
-        # Balance the dataset by taking equal samples from each class
-        class_0_indices = (labels_mapped == 0).nonzero(as_tuple=True)[0]
-        class_1_indices = (labels_mapped == 1).nonzero(as_tuple=True)[0]
-        
-        # Take a smaller number of samples per class for faster training
-        if USE_SUBSET:
-            samples_per_class = min(SUBSET_SIZE // 2, len(class_0_indices), len(class_1_indices))
-            print(f"FAST MODE: Using {samples_per_class} samples per class ({samples_per_class*2} total)")
+        if len(class_counts) < 2 or 0 in class_counts:
+            print("Warning: Missing at least one class. Will use all available data without balancing.")
+            # Use all data without balancing
+            input_ids = encodings['input_ids'].long()  # BERT expects long type
+            attention_mask = encodings['attention_mask'].long()
+            
+            # Split data into training and validation sets without stratification
+            train_indices, val_indices = train_test_split(
+                range(len(labels)), 
+                test_size=0.2,  # 80% train, 20% validation
+                random_state=42
+            )
         else:
-            samples_per_class = min(len(class_0_indices), len(class_1_indices))
-            print(f"Using {samples_per_class} samples per class ({samples_per_class*2} total)")
-        
-        # Randomly sample indices
-        np.random.seed(42)
-        class_0_sample = np.random.choice(class_0_indices, samples_per_class, replace=False)
-        class_1_sample = np.random.choice(class_1_indices, samples_per_class, replace=False)
-        
-        # Combine indices and get corresponding data
-        balanced_indices = torch.cat([torch.tensor(class_0_sample), torch.tensor(class_1_sample)])
-        
-        input_ids = encodings['input_ids'][balanced_indices].long()  # BERT expects long type
-        attention_mask = encodings['attention_mask'][balanced_indices].long()
-        balanced_labels = labels_mapped[balanced_indices]
-        
-        # Split data into training and validation sets
-        train_indices, val_indices = train_test_split(
-            range(len(balanced_indices)), 
-            test_size=0.2,  # 80% train, 20% validation - standard split
-            stratify=balanced_labels,
-            random_state=42
-        )
+            # Balance the dataset by taking equal samples from each class
+            class_0_indices = (labels == 0).nonzero(as_tuple=True)[0]
+            class_1_indices = (labels == 1).nonzero(as_tuple=True)[0]
+            
+            # Take a smaller number of samples per class for faster training
+            if USE_SUBSET:
+                samples_per_class = min(SUBSET_SIZE // 2, len(class_0_indices), len(class_1_indices))
+                print(f"FAST MODE: Using {samples_per_class} samples per class ({samples_per_class*2} total)")
+            else:
+                samples_per_class = min(len(class_0_indices), len(class_1_indices))
+                print(f"Using {samples_per_class} samples per class ({samples_per_class*2} total)")
+            
+            # Randomly sample indices
+            np.random.seed(42)
+            class_0_sample = np.random.choice(class_0_indices, samples_per_class, replace=False)
+            class_1_sample = np.random.choice(class_1_indices, samples_per_class, replace=False)
+            
+            # Combine indices and get corresponding data
+            balanced_indices = torch.cat([torch.tensor(class_0_sample), torch.tensor(class_1_sample)])
+            
+            input_ids = encodings['input_ids'][balanced_indices].long()  # BERT expects long type
+            attention_mask = encodings['attention_mask'][balanced_indices].long()
+            balanced_labels = labels[balanced_indices]
+            
+            # Split data into training and validation sets
+            train_indices, val_indices = train_test_split(
+                range(len(balanced_indices)), 
+                test_size=0.2,  # 80% train, 20% validation
+                stratify=balanced_labels,
+                random_state=42
+            )
+            
+            # Use the balanced labels
+            labels = balanced_labels
         
         # Extract train/val data
-        train_input_ids = input_ids[train_indices].to(device)
-        train_attn_mask = attention_mask[train_indices].to(device)
-        train_labels = balanced_labels[train_indices].to(device)
+        train_input_ids = encodings['input_ids'][train_indices].to(device)
+        train_attn_mask = encodings['attention_mask'][train_indices].to(device)
+        train_labels = labels[train_indices].to(device)
         
-        val_input_ids = input_ids[val_indices].to(device)
-        val_attn_mask = attention_mask[val_indices].to(device)
-        val_labels = balanced_labels[val_indices].to(device)
+        val_input_ids = encodings['input_ids'][val_indices].to(device)
+        val_attn_mask = encodings['attention_mask'][val_indices].to(device)
+        val_labels = labels[val_indices].to(device)
         
         print(f"Training data shape: {train_input_ids.shape}, Labels: {train_labels.shape}")
         print(f"Validation data shape: {val_input_ids.shape}, Labels: {val_labels.shape}")
@@ -183,17 +204,70 @@ def prepare_data_with_new_dataset(raw_data_path, processed_data_path, device, mo
         # Load the new dataset
         df = pd.read_csv(raw_data_path)
         
-        # Ensure the dataset has the required columns and rename them
-        df.columns = ['label', 'id', 'date', 'query', 'user', 'text']
+        # Check the actual columns in the dataset
+        print(f"Dataset columns: {df.columns.tolist()}")
         
-        # Map labels to binary (0: Negative, 1: Positive)
-        label_mapping = {0: 0, 4: 1}  # Adjust as needed for your dataset
-        df['label'] = df['label'].map(label_mapping)
+        # Extract text and sentiment from the appropriate columns
+        # For the new dataset format with 15 columns
+        if 'Text' in df.columns and 'Sentiment' in df.columns:
+            print("Using 'Text' and 'Sentiment' columns from the dataset")
+            
+            # Drop rows with NaN values in Text or Sentiment
+            initial_count = len(df)
+            df = df.dropna(subset=['Text', 'Sentiment'])
+            print(f"Removed {initial_count - len(df)} rows with NaN values")
+            
+            # Clean sentiment values by stripping whitespace
+            df['Sentiment'] = df['Sentiment'].str.strip()
+            
+            # Print unique sentiment values to understand what we're working with
+            print("Unique sentiment values in the dataset:")
+            print(df['Sentiment'].value_counts())
+            
+            # Create a mapping from text sentiment to binary labels
+            sentiment_mapping = {
+                'Positive': 1,
+                'Negative': 0,
+                'Neutral': 0,  # Map neutral to negative
+            }
+            
+            # Filter for rows with known sentiment values
+            df = df[df['Sentiment'].isin(sentiment_mapping.keys())]
+            print(f"After filtering, using {len(df)} rows with valid sentiment values")
+            
+            if len(df) == 0:
+                raise ValueError("No valid sentiment values found in dataset")
+            
+            # Map sentiment values to binary labels
+            df['label'] = df['Sentiment'].map(sentiment_mapping)
+            texts = df['Text'].tolist()
+            
+            # Check class distribution
+            print("Class distribution:")
+            print(df['label'].value_counts())
+            
+        else:
+            # Fall back to the original expected structure
+            print("Attempting to use original dataset format")
+            df.columns = ['label', 'id', 'date', 'query', 'user', 'text']
+            
+            # Drop rows with NaN values
+            df = df.dropna(subset=['label', 'text'])
+            
+            # Map labels to binary (0: Negative, 1: Positive)
+            label_mapping = {0: 0, 4: 1}  # Adjust as needed for your dataset
+            df = df[df['label'].isin(label_mapping.keys())]
+            df['label'] = df['label'].map(label_mapping)
+            texts = df['text'].tolist()
+        
+        # Check if we have enough data left
+        if len(df) < 10:
+            raise ValueError(f"Not enough valid samples for training: only {len(df)} samples after filtering.")
         
         # Tokenize the text data
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased') if model_type == "bert" else DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
         encodings = tokenizer(
-            df['text'].tolist(),
+            texts,
             padding=True,
             truncation=True,
             max_length=512,
@@ -201,7 +275,7 @@ def prepare_data_with_new_dataset(raw_data_path, processed_data_path, device, mo
         )
         
         # Save the processed data for reuse
-        torch.save({'encodings': encodings, 'labels': torch.tensor(df['label'].values)}, processed_data_path)
+        torch.save({'encodings': encodings, 'labels': torch.tensor(df['label'].values, dtype=torch.long)}, processed_data_path)
         print(f"Processed data saved to {processed_data_path}")
         
         # Call the existing prepare_data function to split and balance the data
@@ -357,7 +431,7 @@ def train_model(model, train_data, val_data, device, batch_size=BATCH_SIZE, epoc
     except Exception as e:
         logger.error(f"Error during model training: {e}")
 
-from src.utils.sentiment_model_saver import SentimentAnalysisModelWrapper, save_model
+from src.utils.sentiment_model_saver import SentimentAnalysisModelWrapper, save_model as save_model_util
 
 def save_model(model, model_type=MODEL_TYPE, output_path='model.pkl'):
     """Save the trained model for application use."""
@@ -371,7 +445,7 @@ def save_model(model, model_type=MODEL_TYPE, output_path='model.pkl'):
     
     # Save using joblib
     try:
-        save_model(wrapper_model, output_path)
+        save_model_util(wrapper_model, output_path)
         print(f"Model successfully saved to {output_path}")
         
         # Test the saved model
@@ -409,8 +483,9 @@ def main():
     if gpu_available:
         reset_gpu()
 
-    # Allow user to choose between new dataset and preprocessed data
-    use_new_dataset = input("Use new dataset? (yes/no): ").strip().lower() == 'yes'
+    # Use the new dataset automatically without prompting
+    use_new_dataset = True
+    print(f"Using new dataset: {use_new_dataset}")
 
     if use_new_dataset:
         raw_data_path = os.path.join('data', 'raw', 'sentimentdataset.csv')

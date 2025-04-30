@@ -7,20 +7,36 @@ import torch
 import datetime
 import json
 import logging
+import traceback
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 
 # Fix the import paths by properly adding the parent directory to sys.path
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(parent_dir)
 
+# Import the SentimentClassifier first to ensure it's available when loading the model
+try:
+    from src.training.train_sentiment_model import SentimentClassifier
+    print("✅ Successfully imported SentimentClassifier from training module")
+except ImportError as e:
+    print(f"⚠️ Warning: Could not import SentimentClassifier: {e}")
+    print("   This may cause issues when loading the trained model.")
+
 # Now import from src after fixing the path
-from src.utils.input_validation import validate_input
-from src.models.sentiment_analyzer import analyze_sentiment
+try:
+    from src.utils.input_validation import validate_input
+    from src.models.sentiment_analyzer import analyze_sentiment
+    print("✅ Successfully imported utility functions")
+except ImportError as e:
+    print(f"⚠️ Warning: Could not import utility functions: {e}")
 
 # Add the src/models directory to the path to import from sentiment_analyzer
 sys.path.append(os.path.join(parent_dir, 'src', 'models'))
-from sentiment_analyzer import SentimentModel
-from src.training.train_sentiment_model import SentimentClassifier
+try:
+    from sentiment_analyzer import SentimentModel
+    print("✅ Successfully imported SentimentModel")
+except ImportError as e:
+    print(f"⚠️ Warning: Could not import SentimentModel: {e}")
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
