@@ -24,10 +24,13 @@ sentiment_categories = {
     4: "overwhelmingly positive"
 }
 
+# Load the sentiment model before running tests
+model = joblib.load('backend/model.pkl')
+
 # Try to load the model
 print("Loading sentiment model...")
 try:
-    model = joblib.load('src/models/model.pkl')
+    model = joblib.load('backend/model.pkl')
     print("Model loaded successfully!")
     
     # Test some example texts
@@ -172,8 +175,8 @@ def test_sentiment_prediction_extended(text, expected_category):
     prediction = model.predict([text])[0]
     assert prediction == expected_category, f"Expected {expected_category}, got {prediction}"
 
-# Script to calculate accuracy
-def calculate_accuracy():
+# Script to calculate accuracy with error and failure counts
+def calculate_accuracy_with_details():
     test_cases = [
         ("This is absolutely amazing! Best experience of my life!", 4),
         ("I had a really good time and enjoyed the experience.", 3),
@@ -188,13 +191,28 @@ def calculate_accuracy():
     ]
 
     correct_predictions = 0
+    total_cases = len(test_cases)
+    failed_cases = []
+
     for text, expected_category in test_cases:
         prediction = model.predict([text])[0]
         if prediction == expected_category:
             correct_predictions += 1
+        else:
+            failed_cases.append((text, expected_category, prediction))
 
-    accuracy = correct_predictions / len(test_cases) * 100
-    print(f"Model Accuracy: {accuracy:.2f}%")
+    accuracy = (correct_predictions / total_cases) * 100
+
+    print(f"\nModel Accuracy: {accuracy:.2f}%")
+    print(f"Total Cases: {total_cases}")
+    print(f"Passed: {correct_predictions}")
+    print(f"Failed: {len(failed_cases)}")
+
+    if failed_cases:
+        print("\nFailed Cases:")
+        for text, expected, actual in failed_cases:
+            print(f"Text: '{text}'")
+            print(f"Expected: {expected}, Predicted: {actual}")
 
 # Script to calculate overall accuracy on a dataset
 def calculate_overall_accuracy():
@@ -236,5 +254,5 @@ def calculate_overall_accuracy():
 if __name__ == "__main__":
     unittest.main()
     test_ensure_text_and_label_columns()
-    calculate_accuracy()
+    calculate_accuracy_with_details()
     calculate_overall_accuracy()
