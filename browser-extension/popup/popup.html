@@ -4,48 +4,221 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="popup.css" />
-    <title>Mood Map</title>
+    <title>Mood Map - Sentiment Analysis</title>
+    <!-- Added visualization libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3-cloud@1.2.5/build/d3.layout.cloud.min.js"></script>
   </head>
   <body>
-    <div class="container">
+    <div id="loading" class="loading">
+      <div class="spinner"></div>
+      <div class="loading-text">Loading Mood Map...</div>
+    </div>
+    
+    <div id="content" style="display: none;">
       <header>
         <h1 class="title">Mood Map</h1>
-        <p class="subtitle">AI-Powered Sentiment & Summary</p>
+        <p class="subtitle">Sentiment Analysis Tool</p>
       </header>
 
-      <div class="sentiment-container">
-        <div class="sentiment-gauge">
-          <div class="sentiment-circle">
-            <div class="sentiment-score" id="sentiment-score">...</div>
-          </div>
-        </div>
-        <div class="sentiment-label" id="sentiment-label">Analyzing...</div>
+      <!-- Tab Navigation -->
+      <div class="tab-navigation">
+        <button class="tab-btn active" data-tab="analyze">Analyze</button>
+        <button class="tab-btn" data-tab="history">History</button>
+        <button class="tab-btn" data-tab="visualize">Visualize</button>
+        <button class="tab-btn" data-tab="settings">Settings</button>
       </div>
 
-      <div class="summary-container" id="summary-container">
-        <h3>Summary & Reasoning</h3>
-        <div class="summary-text" id="summary-text">Analyzing content...</div>
-      </div>
-      
-      <div class="analyze-container">
-        <input type="text" id="input-text" placeholder="Type or paste text to analyze..." />
-        <button id="analyze-button"><span>Analyze</span></button>
-      </div>
-      
-      <div class="debug-container">
-        <div class="debug-btn-row">
-          <button id="test-backend-btn">Test Backend</button>
-          <button id="reload-extension-btn">Reload</button>
+      <!-- Analyze Tab -->
+      <div id="analyze-tab" class="tab-content active">
+        <div class="analyze-container">
+          <textarea id="text-input" placeholder="Enter text to analyze"></textarea>
+          <button id="analyze-button">Analyze Sentiment</button>
         </div>
-        <div id="debug-output"></div>
+
+        <div class="analyze-results">
+          <div class="sentiment-container">
+            <div class="sentiment-gauge">
+              <div class="sentiment-circle">
+                <span id="sentiment-score">-</span>
+              </div>
+            </div>
+            <div class="sentiment-label" id="sentiment-label">Waiting for text...</div>
+          </div>
+
+          <div class="visualization-container">
+            <h3>Sentiment Breakdown</h3>
+            <div class="sentiment-bars">
+              <div class="sentiment-bar-container">
+                <span class="sentiment-bar-label">Negative</span>
+                <div class="sentiment-bar negative">
+                  <div class="sentiment-bar-fill" id="negative-bar"></div>
+                </div>
+                <span class="sentiment-bar-value" id="negative-value">0%</span>
+              </div>
+              <div class="sentiment-bar-container">
+                <span class="sentiment-bar-label">Neutral</span>
+                <div class="sentiment-bar neutral">
+                  <div class="sentiment-bar-fill" id="neutral-bar"></div>
+                </div>
+                <span class="sentiment-bar-value" id="neutral-value">0%</span>
+              </div>
+              <div class="sentiment-bar-container">
+                <span class="sentiment-bar-label">Positive</span>
+                <div class="sentiment-bar positive">
+                  <div class="sentiment-bar-fill" id="positive-bar"></div>
+                </div>
+                <span class="sentiment-bar-value" id="positive-value">0%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="summary-container">
+          <h3>Summary</h3>
+          <p id="summary-text" class="summary-text">Enter some text and click "Analyze Sentiment" to get started.</p>
+        </div>
+
+        <div class="model-selector-container">
+          <label for="model-selector">Analysis Mode:</label>
+          <select id="model-selector">
+            <option value="default">Standard Analysis</option>
+            <option value="basic">Basic (Offline Mode)</option>
+          </select>
+        </div>
       </div>
-      
-      <button id="dark-mode-toggle" class="toggle-button">Toggle Dark Mode</button>
-      
-      <footer class="footer">
-        <small>Powered by AI sentiment analysis</small>
-      </footer>
+
+      <!-- History Tab -->
+      <div id="history-tab" class="tab-content">
+        <div class="history-actions">
+          <select id="history-filter">
+            <option value="all">All History</option>
+            <option value="today">Today</option>
+            <option value="week">This Week</option>
+          </select>
+          <button id="clear-history-btn">Clear History</button>
+        </div>
+        
+        <div class="history-list" id="history-list">
+          <!-- History items will be inserted here dynamically -->
+          <div class="empty-history-message">No history items yet. Analyze some text to see it here.</div>
+        </div>
+      </div>
+
+      <!-- Settings Tab -->
+      <div id="settings-tab" class="tab-content">
+        <div class="settings-container">
+          <h3>Theme Settings</h3>
+          <div class="setting-item">
+            <label for="theme-selector">Theme:</label>
+            <select id="theme-selector">
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+              <option value="system">System Default</option>
+            </select>
+          </div>
+          
+          <div class="setting-item">
+            <label for="auto-analyze-toggle">Auto-analyze when page loads:</label>
+            <label class="switch">
+              <input type="checkbox" id="auto-analyze-toggle">
+              <span class="slider round"></span>
+            </label>
+          </div>
+          
+          <h3>API Configuration</h3>
+          <div class="api-config">
+            <div class="setting-item">
+              <label>Current API URL:</label>
+              <span id="api-url-display">http://127.0.0.1:5000</span>
+              <span id="api-status" class="api-status unknown">Unknown</span>
+            </div>
+            
+            <div class="setting-item">
+              <label for="api-protocol-select">Protocol:</label>
+              <select id="api-protocol-select">
+                <option value="http">HTTP</option>
+                <option value="https">HTTPS</option>
+              </select>
+            </div>
+            
+            <div class="setting-item">
+              <label for="api-url-input">API Host:</label>
+              <input type="text" id="api-url-input" placeholder="127.0.0.1:5000">
+            </div>
+            
+            <div class="setting-buttons">
+              <button id="update-api-url-btn">Update API URL</button>
+              <button id="test-api-btn">Test Connection</button>
+            </div>
+            
+            <div id="api-message" class="api-message"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Visualize Tab -->
+      <div id="visualize-tab" class="tab-content">
+        <div class="visualization-actions">
+          <select id="visualization-filter">
+            <option value="all">All History</option>
+            <option value="today">Today</option>
+            <option value="week">This Week</option>
+            <option value="month">This Month</option>
+          </select>
+        </div>
+        
+        <!-- Timeline View -->
+        <div class="visualization-panel">
+          <h3>Sentiment Timeline</h3>
+          <p class="visualization-description">Track how sentiment has changed over time</p>
+          <div class="timeline-container">
+            <canvas id="sentiment-timeline"></canvas>
+          </div>
+        </div>
+        
+        <!-- Word Cloud -->
+        <div class="visualization-panel">
+          <h3>Sentiment Word Cloud</h3>
+          <p class="visualization-description">Most common words colored by sentiment</p>
+          <div class="wordcloud-container" id="sentiment-wordcloud"></div>
+        </div>
+        
+        <!-- Interactive Sentiment Graph -->
+        <div class="visualization-panel">
+          <h3>Interactive Sentiment Analysis</h3>
+          <p class="visualization-description">Explore sentiment patterns in your history</p>
+          <div class="graph-options">
+            <label>
+              <input type="radio" name="graph-type" value="pie" checked> Pie Chart
+            </label>
+            <label>
+              <input type="radio" name="graph-type" value="radar"> Radar Chart
+            </label>
+            <label>
+              <input type="radio" name="graph-type" value="polar"> Polar Area
+            </label>
+          </div>
+          <div class="interactive-graph-container">
+            <canvas id="interactive-sentiment-graph"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer">
+        <span id="version-info">Mood Map v1.0.0</span>
+        <button id="toggle-debug" class="toggle-button">Debug</button>
+      </div>
+
+      <div class="debug-container" style="display:none;">
+        <div class="debug-header">Debug Console</div>
+        <textarea id="debug-output" readonly></textarea>
+        <div class="debug-buttons">
+          <button id="clear-debug-btn">Clear Console</button>
+        </div>
+      </div>
     </div>
-    <script type="module" src="popup.js"></script>
+    <script src="popup.js"></script>
   </body>
 </html>

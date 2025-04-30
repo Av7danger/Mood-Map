@@ -226,3 +226,239 @@
 .sentiment-badge.negative {
   background-color: var(--sentiment-negative-color);
 }
+
+/* Selection Analysis Overlay */
+.mood-map-selection-overlay {
+  position: absolute;
+  z-index: 10000;
+  background-color: #fff;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+  padding: 16px;
+  max-width: 320px;
+  min-width: 240px;
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  color: #333;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  animation: fadeIn 0.3s forwards;
+}
+
+@keyframes fadeIn {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.mood-map-selection-overlay.dark-mode {
+  background-color: var(--background-dark);
+  color: var(--text-light);
+  border-color: var(--border-dark);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+}
+
+.mood-map-overlay-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 10px;
+}
+
+.dark-mode .mood-map-overlay-header {
+  border-bottom-color: var(--border-dark);
+}
+
+.mood-map-overlay-title {
+  font-weight: bold;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mood-map-overlay-title::before {
+  content: '';
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%234285f4"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/></svg>');
+  background-size: contain;
+  background-repeat: no-repeat;
+}
+
+.mood-map-overlay-close {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background-color: #f5f5f5;
+  border-radius: 50%;
+  font-weight: bold;
+  transition: background-color 0.2s, transform 0.2s;
+}
+
+.mood-map-overlay-close:hover {
+  background-color: #e0e0e0;
+  transform: scale(1.1);
+}
+
+.dark-mode .mood-map-overlay-close {
+  background-color: #555;
+}
+
+.dark-mode .mood-map-overlay-close:hover {
+  background-color: #666;
+}
+
+.mood-map-selection-result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mood-map-sentiment-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.mood-map-sentiment-label {
+  font-weight: bold;
+}
+
+.mood-map-sentiment-value {
+  padding: 5px 12px;
+  border-radius: 20px;
+  color: white;
+  font-weight: bold;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  text-transform: capitalize;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.mood-map-sentiment-value::before {
+  content: '';
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+}
+
+.mood-map-sentiment-value.positive {
+  background-color: var(--sentiment-positive-color);
+  background-image: linear-gradient(135deg, var(--sentiment-positive-color), #69c16d);
+}
+
+.mood-map-sentiment-value.positive::before {
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.32-1.45 5.12-3.5H6.38c.8 2.05 2.79 3.5 5.12 3.5z"/></svg>');
+}
+
+.mood-map-sentiment-value.negative {
+  background-color: var(--sentiment-negative-color);
+  background-image: linear-gradient(135deg, var(--sentiment-negative-color), #f77066);
+}
+
+.mood-map-sentiment-value.negative::before {
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.51 9c2.03 0 3.88-1.15 4.81-2.95H7.69c.92 1.8 2.78 2.95 4.81 2.95z"/></svg>');
+}
+
+.mood-map-sentiment-value.neutral {
+  background-color: var(--sentiment-neutral-color);
+  background-image: linear-gradient(135deg, var(--sentiment-neutral-color), #bdbdbd);
+}
+
+.mood-map-sentiment-value.neutral::before {
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M9 14h6v1.5H9z"/><circle cx="15.5" cy="9.5" r="1.5"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"/></svg>');
+}
+
+.mood-map-confidence-meter {
+  margin-top: 8px;
+  height: 8px;
+  background-color: #e0e0e0;
+  border-radius: 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.dark-mode .mood-map-confidence-meter {
+  background-color: #444;
+}
+
+.mood-map-confidence-value {
+  height: 100%;
+  border-radius: 4px;
+  background-color: #2196F3;
+  animation: fillBar 1s ease-out forwards;
+  transform-origin: left;
+}
+
+@keyframes fillBar {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+.mood-map-confidence-text {
+  text-align: right;
+  font-size: 12px;
+  margin-top: 4px;
+  color: #666;
+}
+
+.dark-mode .mood-map-confidence-text {
+  color: #aaa;
+}
+
+.mood-map-selection-text {
+  margin-top: 12px;
+  padding: 12px;
+  background-color: #f9f9f9;
+  border-radius: 6px;
+  max-height: 120px;
+  overflow-y: auto;
+  font-style: italic;
+  font-size: 13px;
+  border-left: 4px solid #ddd;
+  line-height: 1.4;
+}
+
+.dark-mode .mood-map-selection-text {
+  background-color: #444;
+  border-left-color: #555;
+}
+
+.mood-map-loading {
+  text-align: center;
+  padding: 16px 10px;
+  font-style: italic;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.mood-map-loading-spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid rgba(0,0,0,0.1);
+  border-top-color: #2196F3;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.dark-mode .mood-map-loading-spinner {
+  border-color: rgba(255,255,255,0.1);
+  border-top-color: #2196F3;
+}

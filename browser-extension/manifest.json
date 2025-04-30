@@ -3,13 +3,18 @@
   "name": "Mood Map",
   "version": "1.0.1",
   "description": "Analyze the sentiment of social media posts in real-time using AI.",
-  "permissions": ["activeTab", "storage", "scripting"],
+  "permissions": ["activeTab", "storage", "scripting", "contextMenus"],
   "host_permissions": [
     "https://*.facebook.com/*",
     "https://*.twitter.com/*",
     "https://*.instagram.com/*",
     "https://*.linkedin.com/*",
-    "https://*.reddit.com/*"
+    "https://*.reddit.com/*",
+    "https://*.x.com/*",
+    "http://127.0.0.1:5000/*",
+    "http://localhost:8080/*",
+    "http://localhost:8080/*",
+    "http://localhost:5000/*"
   ],
   "background": {
     "service_worker": "mood_analyzer_background.js"

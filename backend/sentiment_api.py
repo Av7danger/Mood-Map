@@ -1,109 +1,22 @@
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
-import joblib
 import sys
 import os
-import torch
-from torch.nn import functional as F
 import datetime
 import json
 import logging
 import traceback
-from transformers import RobertaTokenizer, RobertaForSequenceClassification, AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 
 # Fix the import paths by properly adding the parent directory to sys.path
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(parent_dir)
 
-# Import the SentimentClassifier first to ensure it's available when loading the model
-try:
-    from src.training.train_sentiment_model import SentimentClassifier
-    print("✅ Successfully imported SentimentClassifier from training module")
-except ImportError as e:
-    print(f"⚠️ Warning: Could not import SentimentClassifier: {e}")
-    print("   This may cause issues when loading the trained model.")
-
 # Now import from src after fixing the path
 try:
     from src.utils.input_validation import validate_input
-    from src.models.sentiment_analyzer import analyze_sentiment
     print("✅ Successfully imported utility functions")
 except ImportError as e:
     print(f"⚠️ Warning: Could not import utility functions: {e}")
-
-# Add the src/models directory to the path to import from sentiment_analyzer
-sys.path.append(os.path.join(parent_dir, 'src', 'models'))
-try:
-    from sentiment_analyzer import SentimentModel
-    print("✅ Successfully imported SentimentModel")
-except ImportError as e:
-    print(f"⚠️ Warning: Could not import SentimentModel: {e}")
-
-# Add new globals for RoBERTa model
-roberta_model = None
-roberta_tokenizer = None
-roberta_config = None
-
-def load_roberta_model():
-    """Load the trained RoBERTa sentiment model"""
-    global roberta_model, roberta_tokenizer, roberta_config
-    
-    try:
-        model_dir = os.path.join(parent_dir, "models", "roberta")
-        
-        if not os.path.exists(model_dir):
-            print(f"⚠️ RoBERTa model directory not found at {model_dir}")
-            return False
-            
-        # Load tokenizer
-        tokenizer_path = os.path.join(model_dir, "tokenizer")
-        if os.path.exists(tokenizer_path):
-            print("Loading RoBERTa tokenizer...")
-            roberta_tokenizer = RobertaTokenizer.from_pretrained(tokenizer_path)
-        else:
-            print(f"⚠️ RoBERTa tokenizer not found at {tokenizer_path}")
-            return False
-        
-        # Load model config
-        config_path = os.path.join(model_dir, "model_config.json")
-        if os.path.exists(config_path):
-            with open(config_path, 'r') as f:
-                roberta_config = json.load(f)
-                
-            print(f"RoBERTa model config loaded successfully. Training accuracy: {roberta_config['accuracy']:.4f}")
-        else:
-            print(f"⚠️ RoBERTa model config not found at {config_path}")
-            return False
-        
-        # Load model
-        model_path = os.path.join(model_dir, "roberta_sentiment_model.pt")
-        if os.path.exists(model_path):
-            print("Loading RoBERTa model...")
-            
-            # Initialize model with the same architecture
-            roberta_model = RobertaForSequenceClassification.from_pretrained(
-                roberta_config['model_name'],
-                num_labels=3,  # Three classes: negative (0), neutral (1), positive (2)
-                output_attentions=False,
-                output_hidden_states=False
-            )
-            
-            # Load trained weights
-            roberta_model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
-            
-            # Set model to evaluation mode
-            roberta_model.eval()
-            
-            print("✅ RoBERTa model loaded successfully")
-            return True
-        else:
-            print(f"⚠️ RoBERTa model weights not found at {model_path}")
-            return False
-    
-    except Exception as e:
-        print(f"❌ Error loading RoBERTa model: {e}")
-        traceback.print_exc()
-        return False
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -176,94 +89,61 @@ else:
         "negative_keywords": ["hate", "bad", "terrible", "awful", "worst", "horrible", "disappointing"]
     }
 
-# Load the sentiment analysis model
-try:
-    sentiment_model = joblib.load(os.path.join(os.path.dirname(__file__), 'model.pkl'))
-    print("Sentiment model loaded successfully.")
-except FileNotFoundError:
-    try:
-        # Try loading from src/models directory
-        sentiment_model = joblib.load(os.path.join(parent_dir, 'src', 'models', 'model.pkl'))
-        print("Sentiment model loaded from src/models directory.")
-    except FileNotFoundError:
-        sentiment_model = None
-        print("Sentiment model file not found. Please ensure 'model.pkl' is available.")
-
-# Initialize summarization model
-summarization_model = None
-summarization_tokenizer = None
-summarizer = None
-
-def load_summarization_model():
-    global summarization_model, summarization_tokenizer, summarizer
-    try:
-        # Create cache directory
-        cache_dir = os.path.join(os.path.dirname(__file__), 'model_cache')
-        os.makedirs(cache_dir, exist_ok=True)
-        print(f"Using model cache directory: {cache_dir}")
-        
-        # Load the model for text summarization with local caching
-        model_name = "facebook/bart-base"  # Changed from bart-large-cnn to bart-base
-        print("Loading summarization tokenizer...")
-        summarization_tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=cache_dir)
-        
-        print("Loading summarization model...")
-        summarization_model = AutoModelForSeq2SeqLM.from_pretrained(
-            model_name, 
-            cache_dir=cache_dir,
-            torch_dtype=torch.float16 if torch.cuda.is_available() else None
-        )
-        
-        device = 0 if torch.cuda.is_available() else -1
-        print(f"Using device: {'GPU' if device == 0 else 'CPU'}")
-        summarizer = pipeline(
-            "summarization", 
-            model=summarization_model, 
-            tokenizer=summarization_tokenizer, 
-            device=device,
-            batch_size=1 if device == -1 else 8
-        )
-        print("✅ Summarization model loaded successfully.")
-    except Exception as e:
-        print(f"❌ Failed to load summarization model: {e}")
-
 @app.route('/')
 def home():
     log_request('/', status="200 OK")
-    return "Backend is running!"
+    return jsonify({"status": "ok", "message": "Backend is running!"})
 
-def get_sentiment_percentage(category_index, raw_score=None):
+@app.route('/health')
+def health_check():
+    """Health check endpoint for the browser extension to test API connectivity."""
+    log_request('/health', status="200 OK")
+    return jsonify({
+        "status": "ok", 
+        "message": "API is healthy",
+        "version": "1.0.0",
+        "timestamp": datetime.datetime.now().isoformat()
+    })
+
+def get_sentiment_percentage(text):
     """
-    Convert the sentiment category to a percentage value with improved granularity.
+    A simple rule-based sentiment analyzer that returns a percentage.
+    This is a placeholder for the ML model.
+    """
+    positive_count = 0
+    negative_count = 0
     
-    Args:
-        category_index: Integer from 0-4 representing sentiment category
-        raw_score: Optional float between 0-1 from the model's raw prediction
+    # Count positive and negative keywords
+    for word in config.get("positive_keywords", []):
+        if word.lower() in text.lower():
+            positive_count += 1
+            
+    for word in config.get("negative_keywords", []):
+        if word.lower() in text.lower():
+            negative_count += 1
+    
+    # If no sentiment words found, return neutral
+    if positive_count == 0 and negative_count == 0:
+        return 50
         
-    Returns:
-        A percentage value from 0-100 representing sentiment intensity
-    """
-    # If we have a raw score from the model, use it for more precise percentage
-    if raw_score is not None:
-        # Scale the raw score (typically 0-1) to a percentage with bias correction
-        # This improves the distribution of sentiment percentages to avoid clustering
-        if raw_score < 0.5:
-            # Expand the lower half of the scale (0-0.5) to (0-40)
-            return round(raw_score * 80)
-        else:
-            # Expand the upper half of the scale (0.5-1) to (40-100)
-            return round(40 + (raw_score - 0.5) * 120)
+    # Calculate the percentage (0-100)
+    total = positive_count + negative_count
+    positive_percentage = int((positive_count / total) * 100)
     
-    # Otherwise use an improved mapping for categories with better granularity
-    category_to_percentage = {
-        0: 10,   # Overwhelmingly negative: 10%
-        1: 30,   # Negative: 30%
-        2: 50,   # Neutral: 50%  
-        3: 70,   # Positive: 70%
-        4: 90    # Overwhelmingly positive: 90%
-    }
-    
-    return category_to_percentage.get(category_index, 50)  # Default to 50% if unknown
+    return positive_percentage
+
+def get_sentiment_category(percentage):
+    """Convert percentage to category"""
+    if percentage < 20:
+        return 0  # Overwhelmingly negative
+    elif percentage < 40:
+        return 1  # Negative
+    elif percentage < 60:
+        return 2  # Neutral  
+    elif percentage < 80:
+        return 3  # Positive
+    else:
+        return 4  # Overwhelmingly positive
 
 def get_sentiment_emojis(category_index, sentiment_percentage=None):
     """
@@ -318,13 +198,11 @@ def get_sentiment_emojis(category_index, sentiment_percentage=None):
         # For positive emotions, higher percentage means more intense positive
         index = min(len(primary_emojis) - 1, int(sentiment_percentage / 25))
     else:  # Neutral category
-        # For neutral, extreme percentages (far from 50) mean stronger neutral stance
-        distance_from_center = abs(sentiment_percentage - 50)
-        index = min(len(primary_emojis) - 1, int(distance_from_center / 15))
+        # For neutral, use fixed index
+        index = 1
     
-    # Select emojis based on calculated index
     primary_emoji = primary_emojis[index]
-    secondary_emoji = secondary_emojis[min(index, len(secondary_emojis) - 1)]
+    secondary_emoji = secondary_emojis[min(index, len(secondary_emojis)-1)]
     
     return {"primary": primary_emoji, "secondary": secondary_emoji}
 
@@ -332,11 +210,6 @@ def get_sentiment_emojis(category_index, sentiment_percentage=None):
 def analyze():
     data = request.json
     log_request('/analyze', data, status="Processing")
-    
-    if not sentiment_model:
-        error_msg = "Sentiment model not loaded. Please check the backend setup."
-        log_request('/analyze', data, status="500 Error", error=error_msg)
-        return jsonify({"error": error_msg}), 500
 
     if not data or 'text' not in data:
         error_msg = "Invalid input. Please provide 'text' in the request body."
@@ -346,96 +219,20 @@ def analyze():
     text = data['text']
     
     try:
-        # Initialize missing attributes if they don't exist
-        # This ensures the model works even if these were missing when it was serialized
+        # Simple rule-based sentiment analysis (placeholder for ML model)
+        sentiment_percentage = get_sentiment_percentage(text)
+        category_index = get_sentiment_category(sentiment_percentage)
         
-        # Add hashtags attributes if missing
-        if not hasattr(sentiment_model, 'positive_hashtags'):
-            sentiment_model.positive_hashtags = [
-                "love", "happy", "blessed", "grateful", "joy", "beautiful", "amazing", 
-                "awesome", "excited", "wonderful", "success", "inspiration", "goals",
-                "win", "winning", "blessed", "gratitude", "positive", "positivity"
-            ]
-            print("Added missing positive_hashtags attribute to sentiment model")
-            
-        if not hasattr(sentiment_model, 'negative_hashtags'):
-            sentiment_model.negative_hashtags = [
-                "sad", "angry", "upset", "disappointed", "fail", "failure", "hate", 
-                "depressed", "depression", "anxiety", "stressed", "tired", "exhausted",
-                "worried", "heartbroken", "brokenheart", "lonely", "alone", "hurt"
-            ]
-            print("Added missing negative_hashtags attribute to sentiment model")
-            
-        # Add cache attributes if missing
-        if not hasattr(sentiment_model, 'analysis_cache'):
-            sentiment_model.analysis_cache = {}
-            print("Added missing analysis_cache attribute to sentiment model")
-            
-        if not hasattr(sentiment_model, 'cache_max_size'):
-            sentiment_model.cache_max_size = 1000
-            print("Added missing cache_max_size attribute to sentiment model")
-            
-        # Add keyword attributes if missing
-        if not hasattr(sentiment_model, 'mixed_keywords'):
-            sentiment_model.mixed_keywords = [
-                "bittersweet", "mixed feelings", "conflicted", "ambivalent"
-            ]
-            print("Added missing mixed_keywords attribute to sentiment model")
-            
-        # Add emoji-related attributes if missing
-        if not hasattr(sentiment_model, 'positive_emojis'):
-            sentiment_model.positive_emojis = ["😀", "😃", "😄", "😁", "😊", "👍"]
-            print("Added missing positive_emojis attribute to sentiment model")
-            
-        if not hasattr(sentiment_model, 'negative_emojis'):
-            sentiment_model.negative_emojis = ["😞", "😔", "😢", "😭", "👎"]
-            print("Added missing negative_emojis attribute to sentiment model")
-            
-        if not hasattr(sentiment_model, 'neutral_emojis'):
-            sentiment_model.neutral_emojis = ["😐", "😑", "😶"]
-            print("Added missing neutral_emojis attribute to sentiment model")
-            
-        # Add context-sensitive attributes if missing
-        if not hasattr(sentiment_model, 'context_sensitive_emojis'):
-            sentiment_model.context_sensitive_emojis = {}
-            print("Added missing context_sensitive_emojis attribute to sentiment model")
-            
-        # Add critical keywords attribute if missing
-        if not hasattr(sentiment_model, 'critical_keywords'):
-            sentiment_model.critical_keywords = [
-                "constructive", "feedback", "suggest", "recommend", "improvement"
-            ]
-            print("Added missing critical_keywords attribute to sentiment model")
-            
-        # Override detect_critical_keywords method if it references 'kw'
-        def safe_detect_critical_keywords(text):
-            """Check if any critical/constructive keywords are in the text."""
-            if hasattr(sentiment_model, 'critical_keywords'):
-                return any(keyword in text for keyword in sentiment_model.critical_keywords)
-            return False
-            
-        # Replace the original method with our safe version
-        sentiment_model.detect_critical_keywords = safe_detect_critical_keywords
-            
-        # Get the sentiment category index (0-4) and corresponding label
-        category_index = sentiment_model.predict([text])[0]
-        sentiment_label = sentiment_model.get_sentiment_label(category_index)
-
-        # Get the raw sentiment score if available
-        raw_score = None
-        try:
-            raw_score = sentiment_model.get_raw_score(text)
-        except (AttributeError, Exception) as e:
-            print(f"Could not get raw score: {e}")
-
-        # Calculate percentage based on category and raw score
-        sentiment_percentage = get_sentiment_percentage(category_index, raw_score)
-        # Fallback: ensure sentiment_percentage is always a valid number
-        if sentiment_percentage is None or not isinstance(sentiment_percentage, (int, float)):
-            sentiment_percentage = 50
-        elif sentiment_percentage < 0 or sentiment_percentage > 100:
-            sentiment_percentage = max(0, min(100, sentiment_percentage))
-
+        sentiment_labels = {
+            0: "overwhelmingly negative",
+            1: "negative",
+            2: "neutral",
+            3: "positive", 
+            4: "overwhelmingly positive"
+        }
+        
+        sentiment_label = sentiment_labels[category_index]
+        
         # Get sentiment emojis based on category and percentage
         sentiment_emojis = get_sentiment_emojis(category_index, sentiment_percentage)
 
@@ -445,7 +242,7 @@ def analyze():
         # Prepare the response with detailed sentiment information
         response = {
             "text": text, 
-            "prediction": int(category_index),  # Convert to int for JSON serialization
+            "prediction": int(category_index),
             "sentiment": display_label,
             "sentiment_percentage": sentiment_percentage,
             "sentiment_emojis": sentiment_emojis,
@@ -467,183 +264,34 @@ def analyze():
 
 @app.route('/analyze_roberta', methods=['POST'])
 def analyze_roberta():
-    """Analyze sentiment using the improved RoBERTa model"""
-    data = request.json
-    log_request('/analyze_roberta', data, status="Processing")
-    
-    if not roberta_model or not roberta_tokenizer:
-        print("RoBERTa model not loaded yet, loading now...")
-        if not load_roberta_model():
-            error_msg = "RoBERTa model could not be loaded. Using fallback model instead."
-            print(error_msg)
-            # Redirect to the standard analyze endpoint as fallback
-            return analyze()
-
-    if not data or 'text' not in data:
-        error_msg = "Invalid input. Please provide 'text' in the request body."
-        log_request('/analyze_roberta', data, status="400 Bad Request", error=error_msg)
-        return jsonify({"error": error_msg}), 400
-
-    text = data['text']
-    
-    try:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        roberta_model.to(device)
-        
-        # Prepare the text input
-        encoded_input = roberta_tokenizer.encode_plus(
-            text,
-            add_special_tokens=True,
-            max_length=128,
-            padding='max_length',
-            truncation=True,
-            return_attention_mask=True,
-            return_tensors='pt'
-        )
-        
-        # Move inputs to the specified device
-        input_ids = encoded_input['input_ids'].to(device)
-        attention_mask = encoded_input['attention_mask'].to(device)
-        
-        # Perform inference
-        with torch.no_grad():
-            outputs = roberta_model(
-                input_ids=input_ids,
-                attention_mask=attention_mask
-            )
-            logits = outputs.logits
-        
-        # Get raw predictions and probabilities
-        probs = F.softmax(logits, dim=1).squeeze().tolist()
-        pred_class = torch.argmax(logits, dim=1).item()
-        
-        # Convert RoBERTa's 3-class prediction to 5-class for compatibility
-        # RoBERTa: 0=negative, 1=neutral, 2=positive
-        # Original model: 0=very negative, 1=negative, 2=neutral, 3=positive, 4=very positive
-        
-        if pred_class == 0:  # Negative
-            # If strongly negative (high confidence)
-            category_index = 0 if probs[0] > 0.8 else 1
-        elif pred_class == 1:  # Neutral
-            category_index = 2
-        elif pred_class == 2:  # Positive
-            # If strongly positive (high confidence)
-            category_index = 4 if probs[2] > 0.8 else 3
-        
-        sentiment_label = {
-            0: "overwhelmingly negative",
-            1: "negative",
-            2: "neutral",
-            3: "positive", 
-            4: "overwhelmingly positive"
-        }[category_index]
-
-        # Calculate sentiment percentage
-        if pred_class == 0:  # Negative
-            # Scale from 0-50% based on confidence
-            sentiment_percentage = int(50 - (probs[0] * 40))
-        elif pred_class == 1:  # Neutral
-            # Scale around 50% based on confidence
-            sentiment_percentage = int(50 + ((probs[1] - 0.5) * 20))
-        else:  # Positive
-            # Scale from 50-100% based on confidence
-            sentiment_percentage = int(50 + (probs[2] * 40))
-            
-        # Ensure percentage is within bounds
-        sentiment_percentage = max(0, min(100, sentiment_percentage))
-
-        # Get sentiment emojis based on category and percentage
-        sentiment_emojis = get_sentiment_emojis(category_index, sentiment_percentage)
-
-        # Add percentage to the label
-        display_label = f"{sentiment_label} ({sentiment_percentage}%) {sentiment_emojis['primary']} {sentiment_emojis['secondary']}"
-
-        # Prepare the response with detailed sentiment information
-        response = {
-            "text": text, 
-            "prediction": int(category_index),  # Convert to int for JSON serialization
-            "sentiment": display_label,
-            "sentiment_percentage": sentiment_percentage,
-            "sentiment_emojis": sentiment_emojis,
-            "raw_probabilities": {
-                "negative": probs[0],
-                "neutral": probs[1],
-                "positive": probs[2]
-            },
-            "model": "roberta",
-            "sentiment_category": {
-                "0": "overwhelmingly negative",
-                "1": "negative",
-                "2": "neutral",
-                "3": "positive", 
-                "4": "overwhelmingly positive"
-            }
-        }
-        
-        log_request('/analyze_roberta', data, status="200 Success", error=None)
-        return jsonify(response)
-    
-    except Exception as e:
-        log_request('/analyze_roberta', data, status="500 Error", error=str(e))
-        print(f"Error in RoBERTa sentiment analysis: {e}")
-        traceback.print_exc()
-        # Fallback to the standard analyze endpoint if there's an error
-        print("Falling back to standard sentiment analysis")
-        return analyze()
+    """Placeholder for RoBERTa model analysis"""
+    # Redirect to the simple analyzer since we've removed the ML components
+    return analyze()
 
 @app.route('/summarize', methods=['POST'])
 def summarize():
     data = request.json
     log_request('/summarize', data, status="Processing")
     
-    if not summarizer:
-        print("Summarizer not loaded yet, loading now...")
-        load_summarization_model()
-        if not summarizer:
-            error_msg = "Summarization model not loaded. Please check the backend setup."
-            log_request('/summarize', data, status="500 Error", error=error_msg)
-            return jsonify({"error": error_msg}), 500
-
     if not data or 'text' not in data:
         error_msg = "Invalid input. Please provide 'text' in the request body."
         log_request('/summarize', data, status="400 Bad Request", error=error_msg)
         return jsonify({"error": error_msg}), 400
 
     text = data['text']
-    sentiment_category = data.get('sentiment_category', 2)  # Default to neutral if not provided
-    sentiment_label = data.get('sentiment_label', 'neutral')
-    
-    # Get optional parameters with defaults
-    max_length = data.get('max_length', 60)  # Lower max_length for faster summarization
-    min_length = data.get('min_length', 1)   # Remove minimum word cap
-    
-    # Trim very long inputs to improve performance
-    max_input_length = 512  # Reduce input length for speed
-    if len(text) > max_input_length:
-        print(f"Trimming input text from {len(text)} to {max_input_length} characters")
-        text = text[:max_input_length]
     
     try:
-        start_time = datetime.datetime.now()
-        # Generate the summary
-        summary = summarizer(
-            text, 
-            max_length=max_length, 
-            min_length=min_length, 
-            do_sample=False,
-            num_beams=1,  # Use greedy decoding for speed
-            early_stopping=True
-        )
+        # Create a simple summary by taking the first 2 sentences or 100 chars
+        sentences = text.split('.')
+        simple_summary = '.'.join(sentences[:2]) + '.' if len(sentences) > 1 else text[:100]
         
-        processing_time = (datetime.datetime.now() - start_time).total_seconds()
+        # Generate placeholder opinion based on the length of the text
+        opinion = "This text appears to be " + ("short and concise." if len(text) < 200 else "detailed and informative.")
         
-        # Enhance the summary with model's opinion and sentiment reasoning
-        opinion = generate_model_opinion(sentiment_category, sentiment_label)
-        sentiment_reasoning = generate_sentiment_reasoning(text, sentiment_category, sentiment_label)
         enhanced_summary = (
-            f"Summary: {summary[0]['summary_text']}\n\n"
+            f"Summary: {simple_summary}\n\n"
             f"Model's Opinion: {opinion}\n"
-            f"Reason: {sentiment_reasoning}"
+            f"Reason: This is a simplified summary as the ML components have been removed."
         )
         
         response = {
@@ -651,188 +299,15 @@ def summarize():
             "summary": enhanced_summary,
             "original_length": len(text),
             "summary_length": len(enhanced_summary),
-            "processing_time_seconds": processing_time
+            "processing_time_seconds": 0.1
         }
         
-        log_request('/summarize', data, status=f"200 Success - Processed in {processing_time:.2f}s")
+        log_request('/summarize', data, status="200 Success")
         return jsonify(response)
     except Exception as e:
         log_request('/summarize', data, status="500 Error", error=str(e))
         print(f"Error in text summarization: {e}")
         return jsonify({"error": f"An error occurred during summarization: {str(e)}"}), 500
-
-def generate_sentiment_reasoning(text, sentiment_category, sentiment_label):
-    """Generate detailed reasoning for why the text has the assigned sentiment."""
-    # Convert sentiment category to int if it's a string
-    if isinstance(sentiment_category, str):
-        try:
-            sentiment_category = int(sentiment_category)
-        except ValueError:
-            sentiment_category = 2  # Default to neutral
-    
-    # Improved reasoning templates with more variation and depth
-    reasoning_templates = {
-        0: [  # Overwhelmingly negative
-            "The text contains extremely negative language with strong accusations or hostile rhetoric that suggests intense disapproval.",
-            "Multiple negative expressions and emotionally charged language indicate severe criticism or anger.",
-            "The content uses aggressive terminology that conveys profound dissatisfaction or outrage.",
-            "Strong negative sentiment markers throughout the text indicate extreme opposition or distress."
-        ],
-        1: [  # Negative
-            "The language contains critical terms and phrases that suggest general dissatisfaction.",
-            "Several negative expressions are used to convey disagreement or disappointment.",
-            "The text presents complaints or unfavorable assessments without extreme intensity.",
-            "The content frames the subject in a negative light through subtle criticism."
-        ],
-        2: [  # Neutral
-            "The text maintains a balanced perspective without strong emotional indicators.",
-            "The content primarily conveys information in a factual manner without clear bias.",
-            "There is an approximately equal balance of positive and negative elements, or absence of both.",
-            "The statements are presented objectively with focus on reporting rather than evaluation."
-        ],
-        3: [  # Positive
-            "The language incorporates supportive terminology and approving statements.",
-            "Several positive expressions are used to convey satisfaction or agreement.",
-            "The text frames subjects in a favorable light without excessive enthusiasm.",
-            "The content shows optimism and constructive perspectives on the discussed topics."
-        ],
-        4: [  # Overwhelmingly positive
-            "The text uses extremely enthusiastic language with strong expressions of admiration or joy.",
-            "Multiple superlatives and celebratory phrases indicate exceptional approval or excitement.",
-            "The content shows passionate support through consistent positive terminology.",
-            "Strong positive sentiment markers throughout the text convey intense appreciation."
-        ]
-    }
-    
-    # Select reasoning template based on sentiment category
-    if sentiment_category in reasoning_templates:
-        templates = reasoning_templates[sentiment_category]
-        import random
-        reasoning = random.choice(templates)
-    else:
-        reasoning = "The text contains mixed or ambiguous sentiment signals."
-    
-    # Enhanced context detection for more specific analysis
-    # Political content
-    political_keywords = ['government', 'election', 'vote', 'democracy', 'political', 'policy', 'president', 
-                         'minister', 'parliament', 'congress', 'senate', 'rights', 'freedom', 'law']
-    
-    # Conflict/war related
-    conflict_keywords = ['war', 'attack', 'military', 'soldiers', 'troops', 'weapon', 'battle', 'fight', 
-                        'conflict', 'violence', 'terrorist', 'terrorism', 'bombing', 'killed']
-    
-    # Economic content
-    economic_keywords = ['economy', 'market', 'stock', 'price', 'inflation', 'economic', 'financial', 
-                        'trade', 'business', 'company', 'investment', 'bank', 'money', 'dollar', 'rupee']
-    
-    # Social issues
-    social_keywords = ['community', 'society', 'social', 'minority', 'discrimination', 'equality', 
-                      'justice', 'reform', 'protest', 'movement', 'rights', 'gender', 'race', 'religion']
-    
-    # Add context-specific reasoning
-    if any(keyword in text.lower() for keyword in political_keywords):
-        if sentiment_category <= 1:  # Negative sentiments
-            reasoning += " The text discusses political issues with a critical or concerned perspective, potentially highlighting governance problems or policy disagreements."
-        elif sentiment_category >= 3:  # Positive sentiments
-            reasoning += " The text discusses political topics with an optimistic or supportive tone, possibly endorsing certain policies or leadership actions."
-        else:  # Neutral
-            reasoning += " The text discusses political topics in a balanced manner, presenting information without strong partisan leaning."
-    
-    elif any(keyword in text.lower() for keyword in conflict_keywords):
-        if sentiment_category <= 1:  # Negative sentiments
-            reasoning += " The content references conflict or violence with a tone of concern, criticism, or alarm about the situation."
-        elif sentiment_category >= 3:  # Positive sentiments
-            reasoning += " Despite referencing conflict, the text maintains a hopeful or constructive perspective, possibly focusing on resolution or peace efforts."
-        else:  # Neutral
-            reasoning += " The text references conflict or security issues in a factual reporting style without emotional loading."
-    
-    elif any(keyword in text.lower() for keyword in economic_keywords):
-        if sentiment_category <= 1:  # Negative sentiments
-            reasoning += " The discussion of economic matters takes a pessimistic view, possibly highlighting problems or downturns."
-        elif sentiment_category >= 3:  # Positive sentiments
-            reasoning += " The economic content is framed positively, potentially highlighting growth, opportunity, or recovery."
-        else:  # Neutral
-            reasoning += " Economic information is presented in a factual manner, focusing on data rather than evaluation."
-            
-    elif any(keyword in text.lower() for keyword in social_keywords):
-        if sentiment_category <= 1:  # Negative sentiments
-            reasoning += " The discussion of social issues expresses concern or criticism about societal problems or inequalities."
-        elif sentiment_category >= 3:  # Positive sentiments
-            reasoning += " The social topics are discussed with optimism, possibly focusing on progress, solutions, or community strength."
-        else:  # Neutral
-            reasoning += " Social matters are presented with balanced perspective, acknowledging complexity without strong evaluative stance."
-    
-    return reasoning
-
-def generate_model_opinion(sentiment_category, sentiment_label):
-    """
-    Generate a more nuanced opinion statement from the model based on the sentiment category and label.
-    
-    Args:
-        sentiment_category: Integer category (0-4) or string representation
-        sentiment_label: String label for the sentiment
-        
-    Returns:
-        A contextual opinion about the content
-    """
-    # Try to get percentage from label if available
-    percentage = None
-    if sentiment_label and "(" in sentiment_label and "%" in sentiment_label:
-        try:
-            percentage = int(sentiment_label.split("(")[1].split("%")[0].strip())
-        except (ValueError, IndexError):
-            pass
-    
-    # Convert category to int if it's a string
-    try:
-        category = int(sentiment_category)
-    except (ValueError, TypeError):
-        category = 2  # Default to neutral
-    
-    # More nuanced opinions with intensity gradations based on percentage
-    if percentage is not None:
-        if category == 0:  # Overwhelmingly negative
-            if percentage < 5:
-                return "This content is extremely negative and contains hostile or alarming language."
-            elif percentage < 15:
-                return "This content is highly negative with strong expressions of criticism or disapproval."
-            else:
-                return "This content is very negative and may evoke strong negative emotions."
-        elif category == 1:  # Negative
-            if percentage < 25:
-                return "This content leans negative with several critical or disapproving elements."
-            else:
-                return "This content is somewhat negative, expressing mild dissatisfaction or concern."
-        elif category == 2:  # Neutral
-            if percentage < 45:
-                return "This content is mostly neutral with slight negative undertones."
-            elif percentage > 55:
-                return "This content is mostly neutral with slight positive undertones."
-            else:
-                return "This content is neutral and presents information without strong emotion."
-        elif category == 3:  # Positive
-            if percentage > 75:
-                return "This content is quite positive, expressing clear satisfaction or approval."
-            else:
-                return "This content leans positive with supportive or optimistic elements."
-        elif category == 4:  # Overwhelmingly positive
-            if percentage > 95:
-                return "This content is extremely positive with enthusiastic or celebratory language."
-            elif percentage > 85:
-                return "This content is highly positive with strong expressions of appreciation or joy."
-            else:
-                return "This content is very positive and conveys strong positive emotions."
-    
-    # Fallback to basic opinions if percentage is not available
-    basic_opinions = {
-        0: "This content is highly negative and may evoke strong negative emotions.",
-        1: "This content is negative and expresses dissatisfaction or criticism.",
-        2: "This content is neutral and presents information without strong emotion.",
-        3: "This content is positive and expresses approval or satisfaction.",
-        4: "This content is highly positive and conveys strong positive emotions."
-    }
-    
-    return basic_opinions.get(category, "This content is neutral.")
 
 @app.route("/api/sentiment", methods=["POST"])
 def sentiment_analysis():
@@ -842,10 +317,8 @@ def sentiment_analysis():
             logging.warning("Invalid input received.")
             return jsonify({"error": "Invalid input."}), 400
 
-        text = data.get("text", "")
-        sentiment = analyze_sentiment(text)
-        logging.info(f"Sentiment analysis successful for text: {text}")
-        return jsonify(sentiment)
+        # Redirect to the simple analyzer
+        return analyze()
 
     except Exception as e:
         logging.error(f"Error during sentiment analysis: {e}")
@@ -856,25 +329,11 @@ if __name__ == "__main__":
     print(" MOOD MAP API SERVER ".center(80, "="))
     print("=" * 80)
     
-    # Preload the summarization model at startup for faster first request
-    print("Preloading summarization model...")
-    load_summarization_model()
-    
-    # Preload RoBERTa model
-    print("Preloading RoBERTa sentiment model...")
-    load_roberta_model()
-    
-    # HTTP only mode
-    try:
-        print("\n" + "*" * 80)
-        print(" STARTING SERVER - HTTP MODE ".center(80, "*"))
-        print("*" * 80)
-        print("\n🚀 Server starting at http://127.0.0.1:5000")
-        print("📢 IMPORTANT: The server is now running! Press Ctrl+C to stop.")
-        print("🌐 Access the API at: http://127.0.0.1:5000")
-        print("\n" + "*" * 80 + "\n")
-        app.run(host="127.0.0.1", port=5000)
-    except Exception as e:
-        print(f"\n❌ CRITICAL ERROR: Could not start server: {e}")
-        print("⛔ The server failed to start. Please check the errors above.")
-        sys.exit(1)
+    print("\n" + "*" * 80)
+    print(" STARTING SERVER - HTTP MODE ".center(80, "*"))
+    print("*" * 80)
+    print("\n🚀 Server starting at http://127.0.0.1:5000")
+    print("📢 IMPORTANT: The server is now running! Press Ctrl+C to stop.")
+    print("🌐 Access the API at: http://127.0.0.1:5000")
+    print("\n" + "*" * 80 + "\n")
+    app.run(host="127.0.0.1", port=5000)

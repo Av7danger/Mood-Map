@@ -1,5 +1,31 @@
 console.log("mood_analyzer.js loaded");
 
+// Add visual indicator that extension is loaded
+if (window.location.href.includes('twitter.com') || window.location.href.includes('x.com')) {
+    console.log("Twitter/X detected - adding visual indicator");
+    setTimeout(() => {
+        const indicator = document.createElement('div');
+        indicator.style.position = 'fixed';
+        indicator.style.top = '10px';
+        indicator.style.left = '10px';
+        indicator.style.backgroundColor = 'rgba(0, 128, 255, 0.7)';
+        indicator.style.color = 'white';
+        indicator.style.padding = '5px 10px';
+        indicator.style.borderRadius = '5px';
+        indicator.style.zIndex = '9999';
+        indicator.style.fontSize = '12px';
+        indicator.style.fontWeight = 'bold';
+        indicator.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
+        indicator.textContent = 'Mood Map Extension Active';
+        document.body.appendChild(indicator);
+        
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+            indicator.remove();
+        }, 5000);
+    }, 1000);
+}
+
 // Track the current URL to detect navigation to individual posts
 let currentUrl = window.location.href;
 
@@ -358,4 +384,218 @@ const toggleDarkMode = () => {
 const darkModeButton = document.getElementById('dark-mode-toggle');
 if (darkModeButton) {
     darkModeButton.addEventListener('click', toggleDarkMode);
+}
+
+// Add event listener for messages from background script
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'analyzeSelectedText') {
+    // Get selected text and position
+    const selection = window.getSelection();
+    if (!selection || selection.toString().trim().length === 0) return;
+    
+    // Get the selection range and coordinates
+    const range = selection.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    
+    // Create and show overlay with loading state
+    const overlay = createSelectionOverlay(rect.left + window.scrollX, 
+                                          rect.bottom + window.scrollY);
+    
+    // Call the backend API to analyze the text
+    chrome.runtime.sendMessage(
+      { 
+        type: 'analyzeSentiment', 
+        text: selection.toString().trim() 
+      }, 
+      response => {
+        // Update the overlay with the results
+        updateSelectionOverlayWithResults(overlay, response, selection.toString().trim());
+      }
+    );
+  }
+});
+
+// Function to create the selection analysis overlay
+function createSelectionOverlay(x, y) {
+  // Remove any existing overlay
+  const existingOverlay = document.querySelector('.mood-map-selection-overlay');
+  if (existingOverlay) existingOverlay.remove();
+  
+  // Create overlay element
+  const overlay = document.createElement('div');
+  overlay.className = 'mood-map-selection-overlay';
+  
+  // Check if dark mode is preferred
+  const prefersDarkMode = window.matchMedia && 
+                          window.matchMedia('(prefers-color-scheme: dark)').matches;
+  if (prefersDarkMode) {
+    overlay.classList.add('dark-mode');
+  }
+  
+  // Adjust position to ensure visibility
+  overlay.style.left = `${Math.max(5, Math.min(x, window.innerWidth - 330))}px`;
+  
+  // Position overlay below selection
+  // If it would go below viewport bottom, position it above the selection instead
+  if (y + 220 > window.innerHeight + window.scrollY) {
+    const selectionHeight = 20; // Approximate height of selected text
+    overlay.style.top = `${y - selectionHeight - 240}px`;
+  } else {
+    overlay.style.top = `${y + 10}px`;
+  }
+  
+  // Add header
+  const header = document.createElement('div');
+  header.className = 'mood-map-overlay-header';
+  
+  const title = document.createElement('div');
+  title.className = 'mood-map-overlay-title';
+  title.textContent = 'Mood Map Analysis';
+  
+  const closeBtn = document.createElement('div');
+  closeBtn.className = 'mood-map-overlay-close';
+  closeBtn.textContent = '×';
+  closeBtn.addEventListener('click', () => {
+    overlay.style.opacity = '0';
+    overlay.style.transform = 'translateY(10px)';
+    setTimeout(() => overlay.remove(), 200);
+  });
+  
+  header.appendChild(title);
+  header.appendChild(closeBtn);
+  
+  // Add loading message with spinner
+  const loadingMsg = document.createElement('div');
+  loadingMsg.className = 'mood-map-loading';
+  
+  const spinner = document.createElement('div');
+  spinner.className = 'mood-map-loading-spinner';
+  
+  const loadingText = document.createElement('div');
+  loadingText.textContent = 'Analyzing text...';
+  
+  loadingMsg.appendChild(spinner);
+  loadingMsg.appendChild(loadingText);
+  
+  // Append to overlay
+  overlay.appendChild(header);
+  overlay.appendChild(loadingMsg);
+  
+  // Add to page
+  document.body.appendChild(overlay);
+  
+  return overlay;
+}
+
+// Function to update the overlay with analysis results
+function updateSelectionOverlayWithResults(overlay, results, selectedText) {
+  // Remove loading message
+  const loadingMsg = overlay.querySelector('.mood-map-loading');
+  if (loadingMsg) loadingMsg.remove();
+  
+  // Create results container
+  const resultsContainer = document.createElement('div');
+  resultsContainer.className = 'mood-map-selection-result';
+  
+  // Handle error case
+  if (results.error) {
+    const errorMsg = document.createElement('div');
+    errorMsg.textContent = `Error: ${results.error}`;
+    errorMsg.style.color = 'red';
+    resultsContainer.appendChild(errorMsg);
+    overlay.appendChild(resultsContainer);
+    return;
+  }
+  
+  // Add sentiment information
+  const sentimentRow = document.createElement('div');
+  sentimentRow.className = 'mood-map-sentiment-row';
+  
+  const sentimentLabel = document.createElement('div');
+  sentimentLabel.className = 'mood-map-sentiment-label';
+  sentimentLabel.textContent = 'Sentiment:';
+  
+  const sentimentValue = document.createElement('div');
+  sentimentValue.className = 'mood-map-sentiment-value';
+  sentimentValue.textContent = results.sentiment;
+  
+  // Add color class based on sentiment category
+  if (results.prediction >= 3) {
+    sentimentValue.classList.add('positive');
+  } else if (results.prediction <= 1) {
+    sentimentValue.classList.add('negative');
+  } else {
+    sentimentValue.classList.add('neutral');
+  }
+  
+  sentimentRow.appendChild(sentimentLabel);
+  sentimentRow.appendChild(sentimentValue);
+  resultsContainer.appendChild(sentimentRow);
+  
+  // Add confidence/percentage if available
+  if (results.sentiment_percentage !== undefined) {
+    // Create confidence row
+    const confidenceRow = document.createElement('div');
+    confidenceRow.className = 'mood-map-sentiment-row';
+    
+    const confidenceLabel = document.createElement('div');
+    confidenceLabel.className = 'mood-map-sentiment-label';
+    confidenceLabel.textContent = 'Confidence:';
+    
+    confidenceRow.appendChild(confidenceLabel);
+    resultsContainer.appendChild(confidenceRow);
+    
+    // Create confidence meter
+    const confidenceMeter = document.createElement('div');
+    confidenceMeter.className = 'mood-map-confidence-meter';
+    
+    const confidenceValue = document.createElement('div');
+    confidenceValue.className = 'mood-map-confidence-value';
+    confidenceValue.style.width = `${results.sentiment_percentage}%`;
+    
+    // Set color based on sentiment
+    if (results.prediction >= 3) {
+      confidenceValue.style.backgroundColor = '#4caf50';
+    } else if (results.prediction <= 1) {
+      confidenceValue.style.backgroundColor = '#f44336';
+    } else {
+      confidenceValue.style.backgroundColor = '#2196F3';
+    }
+    
+    confidenceMeter.appendChild(confidenceValue);
+    resultsContainer.appendChild(confidenceMeter);
+    
+    // Add text percentage
+    const confidenceText = document.createElement('div');
+    confidenceText.className = 'mood-map-confidence-text';
+    confidenceText.textContent = `${results.sentiment_percentage}% confidence`;
+    resultsContainer.appendChild(confidenceText);
+  }
+  
+  // Add the selected text
+  if (selectedText && selectedText.length > 0) {
+    const textContainer = document.createElement('div');
+    textContainer.className = 'mood-map-selection-text';
+    textContainer.textContent = selectedText.length > 200 
+      ? selectedText.substring(0, 197) + '...' 
+      : selectedText;
+    resultsContainer.appendChild(textContainer);
+  }
+  
+  // Add the results to the overlay
+  overlay.appendChild(resultsContainer);
+  
+  // Add keyboard shortcut to close
+  const handleKeyDown = (e) => {
+    if (e.key === 'Escape') {
+      overlay.style.opacity = '0';
+      overlay.style.transform = 'translateY(10px)';
+      setTimeout(() => {
+        overlay.remove();
+        document.removeEventListener('keydown', handleKeyDown);
+      }, 200);
+    }
+  };
+  
+  document.addEventListener('keydown', handleKeyDown);
 }

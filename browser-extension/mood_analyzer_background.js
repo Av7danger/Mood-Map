@@ -1,114 +1,198 @@
-// Background script for Mood Map Extension
+// MoodMap Browser Extension Background Script
+// Handles API communication with the sentiment analysis backend
 
-// Define backend API URL
-const BACKEND_URL = 'http://127.0.0.1:5000';
+// Configuration
+const DEFAULT_API_URL = "https://localhost:5000";
+let API_URL = DEFAULT_API_URL;
+let preferredModel = 'roberta'; // Default value, will be updated from storage
 
-// Listen for messages from the popup or content script
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    console.log('Background script received message:', message);
-    
-    // Handle different message types
-    switch (message.type) {
-        case 'analyzeSentiment':
-            analyzeSentiment(message.text, sendResponse);
-            break;
-        case 'summarizeText':
-            summarizeText(message.text, message.sentiment_category, message.sentiment_label, sendResponse);
-            break;
-        case 'checkBackend':
-            checkBackendConnectivity(sendResponse);
-            break;
-        default:
-            console.log('Unknown message type:', message.type);
-            sendResponse({ error: 'Unknown message type' });
-    }
-    
-    // Return true to indicate we'll send a response asynchronously
-    return true;
+// Initialize values from storage
+chrome.storage.local.get(['defaultModel', 'apiUrl'], (result) => {
+  if (result.defaultModel) {
+    preferredModel = result.defaultModel;
+  }
+  
+  if (result.apiUrl) {
+    API_URL = result.apiUrl;
+  }
 });
 
-// Check if backend is available
-async function checkBackendConnectivity(sendResponse) {
-    try {
-        const response = await fetch(`${BACKEND_URL}/`, {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
-        });
-        
-        if (response.ok) {
-            console.log('Backend is available');
-            sendResponse({ isAvailable: true });
-        } else {
-            console.error('Backend returned error:', response.status);
-            sendResponse({ isAvailable: false, error: `HTTP Error: ${response.status}` });
-        }
-    } catch (error) {
-        console.error('Error connecting to backend:', error);
-        sendResponse({ isAvailable: false, error: error.message });
-    }
-}
-
-// Send text to backend API for sentiment analysis
-async function analyzeSentiment(text, sendResponse) {
-    if (!text || text.trim().length === 0) {
-        sendResponse({ error: 'Empty text provided' });
-        return;
+// Create context menu for text selection
+chrome.runtime.onInstalled.addListener(() => {
+  console.log("MoodMap extension installed");
+  
+  // Initialize storage with default settings if not set
+  chrome.storage.local.get(['defaultModel', 'apiUrl'], (result) => {
+    if (!result.defaultModel) {
+      chrome.storage.local.set({ defaultModel: 'roberta' });
     }
     
-    try {
-        const response = await fetch(`${BACKEND_URL}/analyze`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text })
-        });
-        
-        if (response.ok) {
-            const result = await response.json();
-            sendResponse(result);
-        } else {
-            console.error('API error:', response.status);
-            sendResponse({ error: `API error: ${response.status}`, isBackendError: true });
-        }
-    } catch (error) {
-        console.error('Error calling API:', error);
-        sendResponse({ error: error.message, isBackendError: true });
+    if (!result.apiUrl) {
+      chrome.storage.local.set({ apiUrl: DEFAULT_API_URL });
     }
-}
+  });
+  
+  // Create context menu item
+  chrome.contextMenus.create({
+    id: "analyzeWithMoodMap",
+    title: "Analyze with Mood Map",
+    contexts: ["selection"]
+  });
+});
 
-// Send text to backend API for summarization
-async function summarizeText(text, sentiment_category, sentiment_label, sendResponse) {
-    if (!text || text.trim().length === 0) {
-        sendResponse({ error: 'Empty text provided' });
-        return;
+// Handle context menu clicks
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === "analyzeWithMoodMap" && info.selectionText) {
+    // Send message to content script with the selected text
+    chrome.tabs.sendMessage(tab.id, {
+      type: 'analyzeSelectedText',
+      text: info.selectionText
+    });
+  }
+});
+
+// Message handling from content scripts and popup
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log("Background script received message:", request.type);
+  
+  if (request.type === 'analyzeSelectedText' || request.type === 'analyzeSentiment') {
+    const text = request.text;
+    const model = request.model || preferredModel; // Use specified model or default
+    
+    if (!text || text.trim() === '') {
+      sendResponse({ error: "No text provided for analysis" });
+      return true;
     }
     
-    try {
-        const requestData = { text };
-        
-        // Include sentiment information if available
-        if (sentiment_category !== undefined) {
-            requestData.sentiment_category = sentiment_category;
-        }
-        
-        if (sentiment_label) {
-            requestData.sentiment_label = sentiment_label;
-        }
-        
-        const response = await fetch(`${BACKEND_URL}/summarize`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(requestData)
-        });
-        
-        if (response.ok) {
-            const result = await response.json();
-            sendResponse(result);
-        } else {
-            console.error('Summarization API error:', response.status);
-            sendResponse({ error: `API error: ${response.status}`, isBackendError: true });
-        }
-    } catch (error) {
-        console.error('Error calling summarization API:', error);
-        sendResponse({ error: error.message, isBackendError: true });
-    }
+    // Make API request to sentiment analysis endpoint
+    fetch(`${API_URL}/analyze`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ 
+        text: text,
+        model: model // Pass the model to the API
+      })
+    })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+      return response.json();
+    })
+    .then(data => {
+      console.log("Sentiment analysis result:", data);
+      sendResponse(data);
+    })
+    .catch(error => {
+      console.error("Error in sentiment analysis:", error);
+      sendResponse({ error: error.message });
+    });
+    
+    return true; // Keep the message channel open for async response
+  }
+  
+  else if (request.type === 'summarizeText') {
+    const text = request.text;
+    const sentiment = request.sentiment_category;
+    
+    fetch(`${API_URL}/summarize`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ 
+        text: text,
+        sentiment: sentiment
+      })
+    })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+      return response.json();
+    })
+    .then(data => {
+      console.log("Summarization result:", data);
+      sendResponse(data);
+    })
+    .catch(error => {
+      console.error("Error in summarization:", error);
+      sendResponse({ error: error.message });
+    });
+    
+    return true; // Keep the message channel open for async response
+  }
+  
+  else if (request.type === 'updateApiUrl') {
+    const newUrl = request.url;
+    API_URL = newUrl;
+    chrome.storage.local.set({ apiUrl: newUrl });
+    
+    // Test the new URL
+    fetch(`${newUrl}/health`, {
+      method: 'GET'
+    })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+      return response.json();
+    })
+    .then(data => {
+      sendResponse({ success: true, message: "API URL updated and connection verified" });
+    })
+    .catch(error => {
+      console.error("Error connecting to API:", error);
+      sendResponse({ success: false, error: error.message });
+    });
+    
+    return true; // Keep the message channel open for async response
+  }
+  
+  else if (request.type === 'checkBackend') {
+    fetch(`${API_URL}/health`, {
+      method: 'GET'
+    })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
+      }
+      return response.json();
+    })
+    .then(data => {
+      sendResponse({ isAvailable: true });
+    })
+    .catch(error => {
+      console.error("Error checking API:", error);
+      sendResponse({ isAvailable: false, error: error.message });
+    });
+    
+    return true; // Keep the message channel open for async response
+  }
+  
+  else if (request.type === 'updateDefaultModel') {
+    // Update the preferred model
+    preferredModel = request.model;
+    chrome.storage.local.set({ defaultModel: request.model });
+    console.log("Default model updated to:", preferredModel);
+    sendResponse({ success: true });
+    return true;
+  }
+  
+  else if (request.type === 'getPreferredModel') {
+    // Return the current preferred model
+    sendResponse({ model: preferredModel });
+    return true;
+  }
+});
+
+// Function to keep content script ready (in case we implement periodic sentiment checking)
+function keepAlive() {
+  setInterval(() => {
+    console.log("Background service worker keeping alive");
+  }, 20000);
 }
+
+keepAlive();
