@@ -4,11 +4,12 @@ import joblib
 import sys
 import os
 import torch
+from torch.nn import functional as F
 import datetime
 import json
 import logging
 import traceback
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
+from transformers import RobertaTokenizer, RobertaForSequenceClassification, AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 
 # Fix the import paths by properly adding the parent directory to sys.path
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -37,6 +38,72 @@ try:
     print("✅ Successfully imported SentimentModel")
 except ImportError as e:
     print(f"⚠️ Warning: Could not import SentimentModel: {e}")
+
+# Add new globals for RoBERTa model
+roberta_model = None
+roberta_tokenizer = None
+roberta_config = None
+
+def load_roberta_model():
+    """Load the trained RoBERTa sentiment model"""
+    global roberta_model, roberta_tokenizer, roberta_config
+    
+    try:
+        model_dir = os.path.join(parent_dir, "models", "roberta")
+        
+        if not os.path.exists(model_dir):
+            print(f"⚠️ RoBERTa model directory not found at {model_dir}")
+            return False
+            
+        # Load tokenizer
+        tokenizer_path = os.path.join(model_dir, "tokenizer")
+        if os.path.exists(tokenizer_path):
+            print("Loading RoBERTa tokenizer...")
+            roberta_tokenizer = RobertaTokenizer.from_pretrained(tokenizer_path)
+        else:
+            print(f"⚠️ RoBERTa tokenizer not found at {tokenizer_path}")
+            return False
+        
+        # Load model config
+        config_path = os.path.join(model_dir, "model_config.json")
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                roberta_config = json.load(f)
+                
+            print(f"RoBERTa model config loaded successfully. Training accuracy: {roberta_config['accuracy']:.4f}")
+        else:
+            print(f"⚠️ RoBERTa model config not found at {config_path}")
+            return False
+        
+        # Load model
+        model_path = os.path.join(model_dir, "roberta_sentiment_model.pt")
+        if os.path.exists(model_path):
+            print("Loading RoBERTa model...")
+            
+            # Initialize model with the same architecture
+            roberta_model = RobertaForSequenceClassification.from_pretrained(
+                roberta_config['model_name'],
+                num_labels=3,  # Three classes: negative (0), neutral (1), positive (2)
+                output_attentions=False,
+                output_hidden_states=False
+            )
+            
+            # Load trained weights
+            roberta_model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+            
+            # Set model to evaluation mode
+            roberta_model.eval()
+            
+            print("✅ RoBERTa model loaded successfully")
+            return True
+        else:
+            print(f"⚠️ RoBERTa model weights not found at {model_path}")
+            return False
+    
+    except Exception as e:
+        print(f"❌ Error loading RoBERTa model: {e}")
+        traceback.print_exc()
+        return False
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -398,6 +465,132 @@ def analyze():
         print(f"Error in sentiment analysis: {e}")
         return jsonify({"error": f"An error occurred during sentiment analysis: {str(e)}"}), 500
 
+@app.route('/analyze_roberta', methods=['POST'])
+def analyze_roberta():
+    """Analyze sentiment using the improved RoBERTa model"""
+    data = request.json
+    log_request('/analyze_roberta', data, status="Processing")
+    
+    if not roberta_model or not roberta_tokenizer:
+        print("RoBERTa model not loaded yet, loading now...")
+        if not load_roberta_model():
+            error_msg = "RoBERTa model could not be loaded. Using fallback model instead."
+            print(error_msg)
+            # Redirect to the standard analyze endpoint as fallback
+            return analyze()
+
+    if not data or 'text' not in data:
+        error_msg = "Invalid input. Please provide 'text' in the request body."
+        log_request('/analyze_roberta', data, status="400 Bad Request", error=error_msg)
+        return jsonify({"error": error_msg}), 400
+
+    text = data['text']
+    
+    try:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        roberta_model.to(device)
+        
+        # Prepare the text input
+        encoded_input = roberta_tokenizer.encode_plus(
+            text,
+            add_special_tokens=True,
+            max_length=128,
+            padding='max_length',
+            truncation=True,
+            return_attention_mask=True,
+            return_tensors='pt'
+        )
+        
+        # Move inputs to the specified device
+        input_ids = encoded_input['input_ids'].to(device)
+        attention_mask = encoded_input['attention_mask'].to(device)
+        
+        # Perform inference
+        with torch.no_grad():
+            outputs = roberta_model(
+                input_ids=input_ids,
+                attention_mask=attention_mask
+            )
+            logits = outputs.logits
+        
+        # Get raw predictions and probabilities
+        probs = F.softmax(logits, dim=1).squeeze().tolist()
+        pred_class = torch.argmax(logits, dim=1).item()
+        
+        # Convert RoBERTa's 3-class prediction to 5-class for compatibility
+        # RoBERTa: 0=negative, 1=neutral, 2=positive
+        # Original model: 0=very negative, 1=negative, 2=neutral, 3=positive, 4=very positive
+        
+        if pred_class == 0:  # Negative
+            # If strongly negative (high confidence)
+            category_index = 0 if probs[0] > 0.8 else 1
+        elif pred_class == 1:  # Neutral
+            category_index = 2
+        elif pred_class == 2:  # Positive
+            # If strongly positive (high confidence)
+            category_index = 4 if probs[2] > 0.8 else 3
+        
+        sentiment_label = {
+            0: "overwhelmingly negative",
+            1: "negative",
+            2: "neutral",
+            3: "positive", 
+            4: "overwhelmingly positive"
+        }[category_index]
+
+        # Calculate sentiment percentage
+        if pred_class == 0:  # Negative
+            # Scale from 0-50% based on confidence
+            sentiment_percentage = int(50 - (probs[0] * 40))
+        elif pred_class == 1:  # Neutral
+            # Scale around 50% based on confidence
+            sentiment_percentage = int(50 + ((probs[1] - 0.5) * 20))
+        else:  # Positive
+            # Scale from 50-100% based on confidence
+            sentiment_percentage = int(50 + (probs[2] * 40))
+            
+        # Ensure percentage is within bounds
+        sentiment_percentage = max(0, min(100, sentiment_percentage))
+
+        # Get sentiment emojis based on category and percentage
+        sentiment_emojis = get_sentiment_emojis(category_index, sentiment_percentage)
+
+        # Add percentage to the label
+        display_label = f"{sentiment_label} ({sentiment_percentage}%) {sentiment_emojis['primary']} {sentiment_emojis['secondary']}"
+
+        # Prepare the response with detailed sentiment information
+        response = {
+            "text": text, 
+            "prediction": int(category_index),  # Convert to int for JSON serialization
+            "sentiment": display_label,
+            "sentiment_percentage": sentiment_percentage,
+            "sentiment_emojis": sentiment_emojis,
+            "raw_probabilities": {
+                "negative": probs[0],
+                "neutral": probs[1],
+                "positive": probs[2]
+            },
+            "model": "roberta",
+            "sentiment_category": {
+                "0": "overwhelmingly negative",
+                "1": "negative",
+                "2": "neutral",
+                "3": "positive", 
+                "4": "overwhelmingly positive"
+            }
+        }
+        
+        log_request('/analyze_roberta', data, status="200 Success", error=None)
+        return jsonify(response)
+    
+    except Exception as e:
+        log_request('/analyze_roberta', data, status="500 Error", error=str(e))
+        print(f"Error in RoBERTa sentiment analysis: {e}")
+        traceback.print_exc()
+        # Fallback to the standard analyze endpoint if there's an error
+        print("Falling back to standard sentiment analysis")
+        return analyze()
+
 @app.route('/summarize', methods=['POST'])
 def summarize():
     data = request.json
@@ -662,61 +855,26 @@ if __name__ == "__main__":
     print("\n" + "=" * 80)
     print(" MOOD MAP API SERVER ".center(80, "="))
     print("=" * 80)
-    print("\n📋 Request logging enabled - monitoring for extension requests")
-    
-    # Load models and configuration
-    print("\n🔍 Checking sentiment model...")
-    if sentiment_model:
-        print("✅ Sentiment model loaded successfully!")
-    else:
-        print("❌ ERROR: Sentiment model could not be loaded. API will not work properly.")
     
     # Preload the summarization model at startup for faster first request
-    print("\n🔍 Loading summarization model...")
+    print("Preloading summarization model...")
     load_summarization_model()
     
-    # Check if SSL certificate files exist
-    cert_path = os.path.join(os.path.dirname(__file__), "cert.pem")
-    key_path = os.path.join(os.path.dirname(__file__), "key.pem")
+    # Preload RoBERTa model
+    print("Preloading RoBERTa sentiment model...")
+    load_roberta_model()
     
-    print("\n🔍 Checking SSL certificates...")
-    if os.path.exists(cert_path) and os.path.exists(key_path):
-        print("✅ Found SSL certificates, starting server with HTTPS")
-        try:
-            print("\n" + "*" * 80)
-            print(" STARTING SERVER - HTTPS MODE ".center(80, "*"))
-            print("*" * 80)
-            print("\n🚀 Server starting at https://localhost:5000")
-            print("📢 IMPORTANT: The server is now running! Press Ctrl+C to stop.")
-            print("🌐 Access the API at: https://localhost:5000")
-            print("\n" + "*" * 80 + "\n")
-            app.run(ssl_context=(cert_path, key_path))
-        except Exception as e:
-            print(f"\n❌ ERROR: Failed to start server with HTTPS: {e}")
-            print("⚠️ Attempting to start with HTTP instead...")
-            try:
-                print("\n" + "*" * 80)
-                print(" STARTING SERVER - HTTP MODE (FALLBACK) ".center(80, "*"))
-                print("*" * 80)
-                print("\n🚀 Server starting at http://localhost:5000")
-                print("📢 IMPORTANT: The server is now running! Press Ctrl+C to stop.")
-                print("🌐 Access the API at: http://localhost:5000")
-                print("\n" + "*" * 80 + "\n")
-                app.run(host="0.0.0.0", port=5000)
-            except Exception as e2:
-                print(f"\n❌ CRITICAL ERROR: Could not start server: {e2}")
-    else:
-        print("⚠️ SSL certificates not found, starting server with HTTP only")
-        try:
-            print("\n" + "*" * 80)
-            print(" STARTING SERVER - HTTP MODE ".center(80, "*"))
-            print("*" * 80)
-            print("\n🚀 Server starting at http://localhost:5000")
-            print("📢 IMPORTANT: The server is now running! Press Ctrl+C to stop.")
-            print("🌐 Access the API at: http://localhost:5000")
-            print("\n" + "*" * 80 + "\n")
-            app.run(host="0.0.0.0", port=5000)
-        except Exception as e:
-            print(f"\n❌ CRITICAL ERROR: Could not start server: {e}")
-            print("⛔ The server failed to start. Please check the errors above.")
-            sys.exit(1)
+    # HTTP only mode
+    try:
+        print("\n" + "*" * 80)
+        print(" STARTING SERVER - HTTP MODE ".center(80, "*"))
+        print("*" * 80)
+        print("\n🚀 Server starting at http://127.0.0.1:5000")
+        print("📢 IMPORTANT: The server is now running! Press Ctrl+C to stop.")
+        print("🌐 Access the API at: http://127.0.0.1:5000")
+        print("\n" + "*" * 80 + "\n")
+        app.run(host="127.0.0.1", port=5000)
+    except Exception as e:
+        print(f"\n❌ CRITICAL ERROR: Could not start server: {e}")
+        print("⛔ The server failed to start. Please check the errors above.")
+        sys.exit(1)

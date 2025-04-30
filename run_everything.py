@@ -158,38 +158,50 @@ def start_backend_server():
     # Check for certificate files
     cert_path = os.path.join("backend", "cert.pem")
     key_path = os.path.join("backend", "key.pem")
+    ssl_available = False
+    
     if not (os.path.exists(cert_path) and os.path.exists(key_path)):
-        print("⚠️ SSL certificate files not found. Creating self-signed certificates...")
+        print("⚠️ SSL certificate files not found.")
         try:
-            from OpenSSL import crypto
+            # Try to import OpenSSL
+            try:
+                from OpenSSL import crypto
+                ssl_available = True
+            except ImportError:
+                print("⚠️ OpenSSL module not found. To enable HTTPS, install it with:")
+                print("   pip install pyopenssl")
+                print("⚠️ Continuing without SSL (HTTP only mode)...")
             
-            # Create a key pair
-            k = crypto.PKey()
-            k.generate_key(crypto.TYPE_RSA, 2048)
-            
-            # Create a self-signed cert
-            cert = crypto.X509()
-            cert.get_subject().C = "US"
-            cert.get_subject().ST = "California"
-            cert.get_subject().L = "Silicon Valley"
-            cert.get_subject().O = "Mood Map"
-            cert.get_subject().OU = "Development"
-            cert.get_subject().CN = "localhost"
-            cert.set_serial_number(1000)
-            cert.gmtime_adj_notBefore(0)
-            cert.gmtime_adj_notAfter(365*24*60*60)  # Valid for one year
-            cert.set_issuer(cert.get_subject())
-            cert.set_pubkey(k)
-            cert.sign(k, 'sha256')
-            
-            # Save the certificate and private key
-            with open(cert_path, "wb") as f:
-                f.write(crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
-            
-            with open(key_path, "wb") as f:
-                f.write(crypto.dump_privatekey(crypto.FILETYPE_PEM, k))
+            # Create certificates only if OpenSSL is available
+            if ssl_available:
+                print("Creating self-signed certificates...")
+                # Create a key pair
+                k = crypto.PKey()
+                k.generate_key(crypto.TYPE_RSA, 2048)
                 
-            print("✅ Created self-signed certificates")
+                # Create a self-signed cert
+                cert = crypto.X509()
+                cert.get_subject().C = "US"
+                cert.get_subject().ST = "California"
+                cert.get_subject().L = "Silicon Valley"
+                cert.get_subject().O = "Mood Map"
+                cert.get_subject().OU = "Development"
+                cert.get_subject().CN = "localhost"
+                cert.set_serial_number(1000)
+                cert.gmtime_adj_notBefore(0)
+                cert.gmtime_adj_notAfter(365*24*60*60)  # Valid for one year
+                cert.set_issuer(cert.get_subject())
+                cert.set_pubkey(k)
+                cert.sign(k, 'sha256')
+                
+                # Save the certificate and private key
+                with open(cert_path, "wb") as f:
+                    f.write(crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
+                
+                with open(key_path, "wb") as f:
+                    f.write(crypto.dump_privatekey(crypto.FILETYPE_PEM, k))
+                    
+                print("✅ Created self-signed certificates")
         except Exception as e:
             print(f"❌ Error creating certificates: {e}")
             print("Running server without SSL...")
@@ -201,6 +213,7 @@ def start_backend_server():
     
     server_env = os.environ.copy()
     server_env["FLASK_ENV"] = "development"
+    server_env["PYTHONPATH"] = os.getcwd()  # Add the current directory to PYTHONPATH
     
     # CD into the backend directory to ensure paths work correctly
     os.chdir("backend")
@@ -211,7 +224,12 @@ def start_backend_server():
             env=server_env
         )
         print(f"\n✅ Server started with PID: {server_process.pid}")
-        print("The API is available at https://localhost:5000")
+        
+        if ssl_available and os.path.exists(cert_path) and os.path.exists(key_path):
+            print("The API is available at https://localhost:5000")
+        else:
+            print("The API is available at http://localhost:5000")
+        
         return server_process
     except Exception as e:
         print(f"❌ Error starting server: {e}")
@@ -263,7 +281,7 @@ def main():
         
         # Open the browser
         print("\nOpening browser to access the API...")
-        webbrowser.open("https://localhost:5000")
+        webbrowser.open("http://localhost:5000")
         
         # Keep the script running until user interrupts
         print("\nPress Ctrl+C to stop the server and exit.")
