@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="popup.css" />
     <title>Mood Map - Sentiment Analysis</title>
-    <!-- Added visualization libraries -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://d3js.org/d3.v7.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/d3-cloud@1.2.5/build/d3.layout.cloud.min.js"></script>
+    <!-- Using local library files instead of CDN links to avoid CSP errors -->
+    <script src="lib/chart.js"></script>
+    <script src="lib/d3.js"></script>
+    <script src="lib/d3-cloud.js"></script>
   </head>
   <body>
     <div id="loading" class="loading">
@@ -83,8 +83,10 @@
         <div class="model-selector-container">
           <label for="model-selector">Analysis Mode:</label>
           <select id="model-selector">
-            <option value="default">Standard Analysis</option>
-            <option value="basic">Basic (Offline Mode)</option>
+            <option value="ensemble">Ensemble Model (Best Overall)</option>
+            <option value="attention">Attention Model (Detail Focused)</option>
+            <option value="neutral">Neutral Model (Balanced)</option>
+            <option value="simple">Simple Model (Offline Mode)</option>
           </select>
         </div>
       </div>

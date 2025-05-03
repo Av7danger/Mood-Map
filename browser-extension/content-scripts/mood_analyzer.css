@@ -462,3 +462,40 @@
   border-color: rgba(255,255,255,0.1);
   border-top-color: #2196F3;
 }
+
+.mood-map-retry-button {
+  background-color: #2196F3;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  margin-top: 10px;
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 14px;
+  transition: background-color 0.2s, transform 0.1s;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.mood-map-retry-button:hover {
+  background-color: #0d8aee;
+  transform: translateY(-1px);
+}
+
+.mood-map-retry-button:active {
+  background-color: #0c7cd5;
+  transform: translateY(1px);
+}
+
+.dark-mode .mood-map-retry-button {
+  background-color: #3f51b5;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+.dark-mode .mood-map-retry-button:hover {
+  background-color: #303f9f;
+}
+
+.dark-mode .mood-map-retry-button:active {
+  background-color: #283593;
+}
