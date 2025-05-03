@@ -177,10 +177,29 @@ cython_debug/
 node_modules/
 
 # --- Mood Map Project Custom Ignores ---
-# Model and vectorizer files
-src/models/model.pkl
-src/models/pytorch_model.pt
-src/utils/vectorizer.pkl
+
+# Model directories and files
+models/
+src/models/*.pkl
+src/models/*.pt
+src/models/*.h5
+src/models/*.onnx
+src/models/*.tflite
+src/models/checkpoints/
+src/models/pretrained/
+model_checkpoints/
+
+# Data directories
+data/
+data/raw/
+data/interim/
+data/processed/
+data/external/
+
+# Notebooks
+notebooks/
+*.ipynb
+.ipynb_checkpoints/
 
 # Backend model cache and logs
 backend/model_cache/
@@ -191,65 +210,57 @@ browser-extension/lib/
 browser-extension/coverage/
 browser-extension/dist/
 
-# Data outputs
-/data/processed/
-/results/
-backend/model.pkl
-data/raw/training.1600000.processed.noemoticon.csv
+# Configuration files
+*.config
+config/*.json
+fetch_tweets_config.json
+sentiment_api_config.json
 
-# Ignore the following file
-presentation_instructions.txt
+# Results and checkpoints
+results/
+results/checkpoint*/
 
-# Ignore the following file
-run_commands.txt
-
-# Prevent large files from being added to the repository
+# Large files and binary formats
 *.safetensors
 *.pth
 *.bin
 *.csv
-*.log
-*.json
+*.parquet
+*.feather
+*.arrow
+*.pkl
+*.joblib
+*.h5
+*.hdf5
+*.sqlite
+*.db
 
-# Ignore specific directories
-model_cache/
+# Logs and temporary files
 logs/
-data/processed/
-data/raw/
-results/
-
-# Ignore Jupyter Notebook checkpoints
-.ipynb_checkpoints/
-
-# Ignore compiled Python files
-__pycache__/
-*.pyc
-
-# Ignore browser extension build artifacts
-browser-extension/lib/
-browser-extension/coverage/
-browser-extension/dist/
-
-# Configuration files
-fetch_tweets_config.json
-sentiment_api_config.json
-
-# Exclude compiled Python files
-__pycache__/
-*.pyc
-
-# Exclude logs
-backend/logs/
-
-# Exclude model cache
-backend/model_cache/
-
-# Exclude results and checkpoints
-results/
-results/checkpoint-500/
-
-# Exclude temporary files
 *.log
-*.safetensors
-*.pth
-*.bin
+.tmp/
+tmp/
+temp/
+
+# Documentation build
+docs/_build/
+site/
+
+# Visualization outputs
+figures/
+plots/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.pdf
+
+# Environment and IDE
+.env*
+.vscode/
+.idea/
+.venv/
+env/
+venv/
+ENV/
