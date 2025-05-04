@@ -421,8 +421,7 @@ history.pushState = function() {
 };
 
 const replaceState = history.replaceState;
-history.replaceState = function() {
-    replaceState.apply(history, arguments);
+replaceState.apply(history, arguments);
     checkForUrlChange();
 };
 
@@ -561,189 +560,18 @@ function handleAnalysisError(overlay, errorMessage, selectedText) {
   }
 }
 
-// Function to create the selection analysis overlay
+// Function to create the selection analysis overlay - DISABLED VERSION
 function createSelectionOverlay(x, y) {
-  // Remove any existing overlay
-  const existingOverlay = document.querySelector('.mood-map-selection-overlay');
-  if (existingOverlay) existingOverlay.remove();
-  
-  // Create overlay element
-  const overlay = document.createElement('div');
-  overlay.className = 'mood-map-selection-overlay';
-  
-  // Check if dark mode is preferred
-  const prefersDarkMode = window.matchMedia && 
-                          window.matchMedia('(prefers-color-scheme: dark)').matches;
-  if (prefersDarkMode) {
-    overlay.classList.add('dark-mode');
-  }
-  
-  // Adjust position to ensure visibility
-  overlay.style.left = `${Math.max(5, Math.min(x, window.innerWidth - 330))}px`;
-  
-  // Position overlay below selection
-  // If it would go below viewport bottom, position it above the selection instead
-  if (y + 220 > window.innerHeight + window.scrollY) {
-    const selectionHeight = 20; // Approximate height of selected text
-    overlay.style.top = `${y - selectionHeight - 240}px`;
-  } else {
-    overlay.style.top = `${y + 10}px`;
-  }
-  
-  // Add header
-  const header = document.createElement('div');
-  header.className = 'mood-map-overlay-header';
-  
-  const title = document.createElement('div');
-  title.className = 'mood-map-overlay-title';
-  title.textContent = 'Mood Map Analysis';
-  
-  const closeBtn = document.createElement('div');
-  closeBtn.className = 'mood-map-overlay-close';
-  closeBtn.textContent = '×';
-  closeBtn.addEventListener('click', () => {
-    overlay.style.opacity = '0';
-    overlay.style.transform = 'translateY(10px)';
-    setTimeout(() => overlay.remove(), 200);
-  });
-  
-  header.appendChild(title);
-  header.appendChild(closeBtn);
-  
-  // Add loading message with spinner
-  const loadingMsg = document.createElement('div');
-  loadingMsg.className = 'mood-map-loading';
-  
-  const spinner = document.createElement('div');
-  spinner.className = 'mood-map-loading-spinner';
-  
-  const loadingText = document.createElement('div');
-  loadingText.textContent = 'Analyzing text...';
-  
-  loadingMsg.appendChild(spinner);
-  loadingMsg.appendChild(loadingText);
-  
-  // Append to overlay
-  overlay.appendChild(header);
-  overlay.appendChild(loadingMsg);
-  
-  // Add to page
-  document.body.appendChild(overlay);
-  
-  return overlay;
+  // This function is now disabled to prevent popup windows
+  console.log("Popup analysis window has been disabled");
+  return null;
 }
 
-// Function to update the overlay with analysis results
+// Function to update the overlay with analysis results - DISABLED VERSION
 function updateSelectionOverlayWithResults(overlay, results, selectedText) {
-  // Remove loading message
-  const loadingMsg = overlay.querySelector('.mood-map-loading');
-  if (loadingMsg) loadingMsg.remove();
-  
-  // Create results container
-  const resultsContainer = document.createElement('div');
-  resultsContainer.className = 'mood-map-selection-result';
-  
-  // Handle error case
-  if (results.error) {
-    const errorMsg = document.createElement('div');
-    errorMsg.textContent = `Error: ${results.error}`;
-    errorMsg.style.color = 'red';
-    resultsContainer.appendChild(errorMsg);
-    overlay.appendChild(resultsContainer);
-    return;
-  }
-  
-  // Add sentiment information
-  const sentimentRow = document.createElement('div');
-  sentimentRow.className = 'mood-map-sentiment-row';
-  
-  const sentimentLabel = document.createElement('div');
-  sentimentLabel.className = 'mood-map-sentiment-label';
-  sentimentLabel.textContent = 'Sentiment:';
-  
-  const sentimentValue = document.createElement('div');
-  sentimentValue.className = 'mood-map-sentiment-value';
-  sentimentValue.textContent = results.sentiment;
-  
-  // Add color class based on sentiment category - UPDATED FOR 3-CLASS SYSTEM
-  if (results.prediction == 2) {
-    sentimentValue.classList.add('positive');
-  } else if (results.prediction == 0) {
-    sentimentValue.classList.add('negative');
-  } else {
-    sentimentValue.classList.add('neutral');
-  }
-  
-  sentimentRow.appendChild(sentimentLabel);
-  sentimentRow.appendChild(sentimentValue);
-  resultsContainer.appendChild(sentimentRow);
-  
-  // Add confidence/percentage if available
-  if (results.sentiment_percentage !== undefined) {
-    // Create confidence row
-    const confidenceRow = document.createElement('div');
-    confidenceRow.className = 'mood-map-sentiment-row';
-    
-    const confidenceLabel = document.createElement('div');
-    confidenceLabel.className = 'mood-map-sentiment-label';
-    confidenceLabel.textContent = 'Confidence:';
-    
-    confidenceRow.appendChild(confidenceLabel);
-    resultsContainer.appendChild(confidenceRow);
-    
-    // Create confidence meter
-    const confidenceMeter = document.createElement('div');
-    confidenceMeter.className = 'mood-map-confidence-meter';
-    
-    const confidenceValue = document.createElement('div');
-    confidenceValue.className = 'mood-map-confidence-value';
-    confidenceValue.style.width = `${results.sentiment_percentage}%`;
-    
-    // Set color based on sentiment - UPDATED FOR 3-CLASS SYSTEM
-    if (results.prediction == 2) {
-      confidenceValue.style.backgroundColor = '#4caf50'; // positive - green
-    } else if (results.prediction == 0) {
-      confidenceValue.style.backgroundColor = '#f44336'; // negative - red
-    } else {
-      confidenceValue.style.backgroundColor = '#2196F3'; // neutral - blue
-    }
-    
-    confidenceMeter.appendChild(confidenceValue);
-    resultsContainer.appendChild(confidenceMeter);
-    
-    // Add text percentage
-    const confidenceText = document.createElement('div');
-    confidenceText.className = 'mood-map-confidence-text';
-    confidenceText.textContent = `${results.sentiment_percentage}% confidence`;
-    resultsContainer.appendChild(confidenceText);
-  }
-  
-  // Add the selected text
-  if (selectedText && selectedText.length > 0) {
-    const textContainer = document.createElement('div');
-    textContainer.className = 'mood-map-selection-text';
-    textContainer.textContent = selectedText.length > 200 
-      ? selectedText.substring(0, 197) + '...' 
-      : selectedText;
-    resultsContainer.appendChild(textContainer);
-  }
-  
-  // Add the results to the overlay
-  overlay.appendChild(resultsContainer);
-  
-  // Add keyboard shortcut to close
-  const handleKeyDown = (e) => {
-    if (e.key === 'Escape') {
-      overlay.style.opacity = '0';
-      overlay.style.transform = 'translateY(10px)';
-      setTimeout(() => {
-        overlay.remove();
-        document.removeEventListener('keydown', handleKeyDown);
-      }, 200);
-    }
-  };
-  
-  document.addEventListener('keydown', handleKeyDown);
+  // This function is now disabled to prevent popup windows
+  console.log("Popup analysis window has been disabled");
+  return;
 }
 
 // Mood Map Content Script
@@ -853,8 +681,8 @@ function addStylesIfNeeded() {
   }
 }
 
-// Generate sentiment badge element
-function createSentimentBadge(sentiment = null, score = null, isLoading = false, error = false) {
+// Generate sentiment badge element with click functionality to show detailed analysis
+function createSentimentBadge(sentiment = null, score = null, isLoading = false, error = false, fullAnalysisData = null) {
   const container = document.createElement('div');
   container.className = MOOD_MAP_CONTAINER_CLASS;
   
@@ -891,6 +719,37 @@ function createSentimentBadge(sentiment = null, score = null, isLoading = false,
       tooltip.className = 'mood-map-tooltip';
       tooltip.textContent = `Sentiment score: ${score.toFixed(2)}`;
       badge.appendChild(tooltip);
+    }
+    
+    // Store the sentiment data for the click handler
+    if (fullAnalysisData) {
+      // Store the full analysis data as a data attribute
+      badge.dataset.sentimentData = JSON.stringify(fullAnalysisData);
+      
+      // Add click event listener to show detailed overlay
+      badge.addEventListener('click', function(e) {
+        e.stopPropagation();
+        console.log('Sentiment badge clicked, showing detailed analysis');
+        
+        // Create display data for the overlay
+        const displayData = {
+          emoji: emoji,
+          color: sentiment.toLowerCase() === 'positive' ? '#4caf50' : 
+                 sentiment.toLowerCase() === 'negative' ? '#f44336' : '#9e9e9e',
+          sentimentLabel: sentiment
+        };
+        
+        // Find the parent tweet element
+        const tweetElement = badge.closest('article') || badge.closest('[data-testid="tweet"]') || 
+                            container.parentElement.closest('article');
+        
+        // Show the detailed overlay
+        showDetailedOverlay(tweetElement || container.parentElement, fullAnalysisData, displayData);
+      });
+      
+      // Make it clear this is clickable
+      badge.style.cursor = 'pointer';
+      badge.title = 'Click for detailed analysis';
     }
   }
   
@@ -952,85 +811,172 @@ function processTwitterContent() {
   });
 }
 
-// Analyze tweet text with retry logic and better error handling
+// Function to analyze tweet text with throttling and retry logic
 function analyzeTweetText(text, loadingBadgeContainer, attempt = 1) {
   // Trim text to maximum length
   const trimmedText = text.substring(0, MAX_TEXT_LENGTH);
   
-  // Use runtime API to send message to background script
-  chrome.runtime.sendMessage(
-    {
-      type: 'analyzeSentiment',
-      text: trimmedText
-    },
-    response => {
-      // Handle errors or missing response
-      if (!response || chrome.runtime.lastError) {
-        console.error('Mood Map analysis failed:', chrome.runtime.lastError);
-        
-        // Retry logic
-        if (attempt < MAX_RETRY_ATTEMPTS) {
-          console.log(`Retry attempt ${attempt + 1} for text: ${text.substring(0, 20)}...`);
-          setTimeout(() => {
-            analyzeTweetText(text, loadingBadgeContainer, attempt + 1);
-          }, 1000 * attempt); // Exponential backoff
-          return;
-        }
-        
-        // When all retries fail, show neutral result instead of error badge
-        const neutralResult = {
-          sentiment: 'Neutral',
-          score: 0,
-          offline: true
-        };
-        const sentimentBadge = createSentimentBadge(neutralResult.sentiment, neutralResult.score);
-        
-        if (loadingBadgeContainer && loadingBadgeContainer.parentNode) {
-          loadingBadgeContainer.parentNode.replaceChild(sentimentBadge, loadingBadgeContainer);
-        }
+  // Define callback to handle the response
+  const handleResponse = response => {
+    // Handle errors or missing response
+    if (!response || chrome.runtime.lastError) {
+      console.error('Mood Map analysis failed:', chrome.runtime.lastError);
+      
+      // Retry logic
+      if (attempt < MAX_RETRY_ATTEMPTS) {
+        console.log(`Retry attempt ${attempt + 1} for text: ${text.substring(0, 20)}...`);
+        setTimeout(() => {
+          analyzeTweetText(text, loadingBadgeContainer, attempt + 1);
+        }, 1000 * attempt); // Exponential backoff
         return;
       }
       
-      // If response contains error but no API connection
-      if (response.error) {
-        console.warn('API error detected, using fallback:', response.error);
-        
-        // Use neutral sentiment as fallback on error
-        const fallbackResult = {
-          sentiment: 'Neutral',
-          score: 0,
-          offline: true
-        };
-        
-        const sentimentBadge = createSentimentBadge(fallbackResult.sentiment, fallbackResult.score);
-        
-        if (loadingBadgeContainer && loadingBadgeContainer.parentNode) {
-          loadingBadgeContainer.parentNode.replaceChild(sentimentBadge, loadingBadgeContainer);
-        }
-        return;
-      }
+      // When all retries fail, show error badge
+      const errorBadge = createSentimentBadge(null, null, false, true);
       
-      // Extract sentiment information
-      let sentiment, score;
-      if (response.label) {
-        sentiment = response.label;
-        score = response.score || 0;
-      } else if (response.sentiment) {
-        sentiment = response.sentiment;
-        score = response.score || response.prediction || 0;
-      } else {
-        // Default to neutral if no sentiment info found
-        sentiment = 'Neutral';
-        score = 0;
-      }
-      
-      // Create the sentiment badge
-      const sentimentBadge = createSentimentBadge(sentiment, score);
-      
-      // Replace loading badge with sentiment badge
       if (loadingBadgeContainer && loadingBadgeContainer.parentNode) {
-        loadingBadgeContainer.parentNode.replaceChild(sentimentBadge, loadingBadgeContainer);
+        loadingBadgeContainer.parentNode.replaceChild(errorBadge, loadingBadgeContainer);
       }
+      return;
+    }
+    
+    // If response contains error
+    if (response.error) {
+      console.warn('API error detected, showing error badge:', response.error);
+      
+      // Show error badge
+      const errorBadge = createSentimentBadge(null, null, false, true);
+      
+      if (loadingBadgeContainer && loadingBadgeContainer.parentNode) {
+        loadingBadgeContainer.parentNode.replaceChild(errorBadge, loadingBadgeContainer);
+      }
+      return;
+    }
+    
+    // Extract sentiment information
+    let sentiment, score, category;
+    
+    if (response.label) {
+      sentiment = response.label;
+      score = response.score || 0;
+      category = response.category !== undefined ? response.category : 1; // Default to neutral if category missing
+    } else if (response.sentiment) {
+      sentiment = response.sentiment;
+      score = response.score || 0;
+      category = response.prediction !== undefined ? response.prediction : 1; // Default to neutral if prediction missing
+    } else {
+      // Default to neutral if no sentiment info found
+      sentiment = 'Neutral';
+      score = 0;
+      category = 1;
+    }
+    
+    // Validate category is within range 0-2
+    if (category < 0 || category > 2) {
+      category = 1; // Default to neutral for invalid categories
+    }
+    
+    console.log(`Sentiment analysis result: ${sentiment} (category: ${category}, score: ${score})`);
+    
+    // Add confidence value if not present
+    if (!response.confidence && response.score !== undefined) {
+      response.confidence = Math.abs(response.score);
+    }
+    
+    // Create the sentiment badge with full analysis data for click handling
+    const sentimentBadge = createSentimentBadge(
+      sentiment,
+      score, 
+      false, 
+      false, 
+      response  // Pass the full response object for the detailed overlay
+    );
+    
+    // Replace loading badge with sentiment badge
+    if (loadingBadgeContainer && loadingBadgeContainer.parentNode) {
+      loadingBadgeContainer.parentNode.replaceChild(sentimentBadge, loadingBadgeContainer);
+    }
+  };
+  
+  // Use our request queue system instead of direct API calls
+  queueSentimentRequest(trimmedText, handleResponse);
+}
+
+// Request rate limiting configuration
+const REQUEST_THROTTLING = {
+  enabled: true,
+  maxRequestsPerMinute: 30,
+  requestQueue: [],
+  requestTimestamps: [],
+  processingQueue: false
+};
+
+// Function to check if we should throttle requests
+function shouldThrottleRequest() {
+  if (!REQUEST_THROTTLING.enabled) return false;
+  
+  // Clean old timestamps (older than 1 minute)
+  const now = Date.now();
+  REQUEST_THROTTLING.requestTimestamps = REQUEST_THROTTLING.requestTimestamps.filter(
+    timestamp => now - timestamp < 60000
+  );
+  
+  // If we're under the limit, allow the request
+  return REQUEST_THROTTLING.requestTimestamps.length >= REQUEST_THROTTLING.maxRequestsPerMinute;
+}
+
+// Function to add a request to the queue
+function queueSentimentRequest(text, callback, priority = false) {
+  // Add to queue
+  const request = { text, callback, timestamp: Date.now() };
+  
+  if (priority) {
+    // Priority requests go to the front of the queue
+    REQUEST_THROTTLING.requestQueue.unshift(request);
+  } else {
+    // Normal requests go to the back
+    REQUEST_THROTTLING.requestQueue.push(request);
+  }
+  
+  // Start processing the queue if not already processing
+  if (!REQUEST_THROTTLING.processingQueue) {
+    processRequestQueue();
+  }
+}
+
+// Function to process the sentiment analysis request queue
+function processRequestQueue() {
+  if (REQUEST_THROTTLING.requestQueue.length === 0) {
+    REQUEST_THROTTLING.processingQueue = false;
+    return;
+  }
+  
+  REQUEST_THROTTLING.processingQueue = true;
+  
+  // Check if we should throttle
+  if (shouldThrottleRequest()) {
+    console.log('Throttling sentiment API requests, waiting before processing next request...');
+    setTimeout(processRequestQueue, 2000); // Wait 2 seconds before trying again
+    return;
+  }
+  
+  // Process next request in queue
+  const request = REQUEST_THROTTLING.requestQueue.shift();
+  
+  // Record this request timestamp
+  REQUEST_THROTTLING.requestTimestamps.push(Date.now());
+  
+  console.log(`Processing queued request (${REQUEST_THROTTLING.requestQueue.length} remaining in queue)`);
+  
+  // Send the actual request
+  chrome.runtime.sendMessage(
+    { type: 'analyzeSentiment', text: request.text },
+    response => {
+      // Call the callback with the response
+      request.callback(response);
+      
+      // Process next request after a small delay to prevent bursts
+      setTimeout(processRequestQueue, 500);
     }
   );
 }
@@ -1088,5 +1034,258 @@ function initialize() {
   console.log('Mood Map content script initialized');
 }
 
+// Add CSS to control MoodMap popup overlays - allowing only the emoji click popup
+function addOverlayBlockingStyles() {
+  const styleEl = document.createElement('style');
+  styleEl.id = 'mood-map-overlay-blocker';
+  styleEl.textContent = `
+    /* Hide unwanted MoodMap popup overlays */
+    #mood-map-overlay, 
+    .mood-map-overlay,
+    div[id*="mood-map"][id*="overlay"]:not(.mood-map-selection-overlay),
+    div[class*="mood-map"][class*="overlay"]:not(.mood-map-selection-overlay),
+    .mood-map-analysis {
+      display: none !important;
+      visibility: hidden !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+      z-index: -9999 !important;
+    }
+    
+    /* Ensure we're allowing the emoji click popup */
+    .mood-map-selection-overlay {
+      display: block !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+      pointer-events: auto !important;
+      z-index: 10000 !important;
+    }
+    
+    /* Ensure we're not hiding the small inline badges */
+    .mood-map-badge,
+    .mood-map-indicator,
+    .${BADGE_CLASS},
+    .${MOOD_MAP_CONTAINER_CLASS} {
+      display: inline-flex !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+    }
+  `;
+  document.head.appendChild(styleEl);
+  console.log("Added styles to selectively block MoodMap popups");
+}
+
+// Call this function early to ensure popups are blocked
+addOverlayBlockingStyles();
+
+// Also call it on window load and after a small delay to be extra safe
+window.addEventListener('load', () => {
+  addOverlayBlockingStyles();
+  // Call again after a delay in case content loads dynamically
+  setTimeout(addOverlayBlockingStyles, 1000);
+  setTimeout(addOverlayBlockingStyles, 3000);
+});
+
 // Start the extension
 initialize();
+
+// Function to show detailed sentiment overlay
+function showDetailedOverlay(element, sentimentData, displayData) {
+  // Remove any existing overlay first
+  const existingOverlay = document.querySelector('.mood-map-selection-overlay');
+  if (existingOverlay) {
+    existingOverlay.remove();
+  }
+  
+  // Create overlay container
+  const overlay = document.createElement('div');
+  overlay.className = 'mood-map-selection-overlay';
+  
+  // Use system dark mode preference if available
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    overlay.classList.add('dark-mode');
+  }
+  
+  // Calculate position (near the element but visible)
+  const rect = element.getBoundingClientRect();
+  
+  // Create header with title and close button
+  const header = document.createElement('div');
+  header.className = 'mood-map-overlay-header';
+  header.innerHTML = `
+    <div class="mood-map-overlay-title">Mood Map Analysis</div>
+    <div class="mood-map-overlay-close">×</div>
+  `;
+  
+  // Create results content
+  const results = document.createElement('div');
+  results.className = 'mood-map-selection-result';
+  
+  // Add sentiment info
+  const sentimentRow = document.createElement('div');
+  sentimentRow.className = 'mood-map-sentiment-row';
+  sentimentRow.innerHTML = `
+    <div class="mood-map-sentiment-label">Sentiment</div>
+    <div class="mood-map-sentiment-value ${displayData.sentimentLabel.toLowerCase()}">${displayData.sentimentLabel}</div>
+  `;
+  
+  // Create confidence meter
+  const confidenceValue = sentimentData.confidence || 0.75;
+  const confidenceMeter = document.createElement('div');
+  confidenceMeter.innerHTML = `
+    <div class="mood-map-confidence-meter">
+      <div class="mood-map-confidence-value" style="width: ${confidenceValue * 100}%"></div>
+    </div>
+    <div class="mood-map-confidence-text">Confidence: ${Math.round(confidenceValue * 100)}%</div>
+  `;
+  
+  // Add analyzed text preview
+  const textPreview = document.createElement('div');
+  textPreview.className = 'mood-map-selection-text';
+  textPreview.textContent = element.innerText.trim().substring(0, 150) + (element.innerText.length > 150 ? '...' : '');
+  
+  // Add styles specific to this overlay
+  const style = document.createElement('style');
+  style.textContent = `
+    .mood-map-selection-overlay {
+      position: absolute;
+      z-index: 10000;
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      padding: 12px;
+      width: 320px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #333;
+      font-size: 14px;
+    }
+    
+    .mood-map-selection-overlay.dark-mode {
+      background-color: #282c34;
+      color: #e1e1e1;
+      border: 1px solid #444;
+    }
+    
+    .mood-map-overlay-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 8px;
+    }
+    
+    .dark-mode .mood-map-overlay-header {
+      border-bottom-color: #444;
+    }
+    
+    .mood-map-overlay-title {
+      font-weight: bold;
+      font-size: 16px;
+    }
+    
+    .mood-map-overlay-close {
+      cursor: pointer;
+      font-size: 20px;
+      line-height: 1;
+      padding: 0 5px;
+    }
+    
+    .mood-map-sentiment-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    
+    .mood-map-sentiment-value {
+      font-weight: bold;
+      padding: 3px 8px;
+      border-radius: 12px;
+      color: white;
+    }
+    
+    .mood-map-sentiment-value.positive {
+      background-color: #4caf50;
+    }
+    
+    .mood-map-sentiment-value.neutral {
+      background-color: #9e9e9e;
+    }
+    
+    .mood-map-sentiment-value.negative {
+      background-color: #f44336;
+    }
+    
+    .mood-map-confidence-meter {
+      height: 8px;
+      background-color: #f1f1f1;
+      border-radius: 4px;
+      margin-bottom: 5px;
+      overflow: hidden;
+    }
+    
+    .dark-mode .mood-map-confidence-meter {
+      background-color: #3c3c3c;
+    }
+    
+    .mood-map-confidence-value {
+      height: 100%;
+      background-color: #2196f3;
+    }
+    
+    .mood-map-confidence-text {
+      font-size: 12px;
+      color: #666;
+      text-align: right;
+    }
+    
+    .dark-mode .mood-map-confidence-text {
+      color: #aaa;
+    }
+    
+    .mood-map-selection-text {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #eee;
+      font-size: 13px;
+      line-height: 1.5;
+      max-height: 100px;
+      overflow-y: auto;
+    }
+    
+    .dark-mode .mood-map-selection-text {
+      border-top-color: #444;
+    }
+  `;
+  
+  // Assemble the overlay
+  overlay.appendChild(style);
+  overlay.appendChild(header);
+  results.appendChild(sentimentRow);
+  results.appendChild(confidenceMeter);
+  overlay.appendChild(results);
+  overlay.appendChild(textPreview);
+  
+  // Position overlay
+  overlay.style.position = 'absolute';
+  overlay.style.top = `${rect.bottom + window.scrollY + 10}px`;
+  overlay.style.left = `${rect.left + window.scrollX}px`;
+  
+  // Add overlay to document
+  document.body.appendChild(overlay);
+  
+  // Handle close button click
+  const closeButton = overlay.querySelector('.mood-map-overlay-close');
+  closeButton.addEventListener('click', () => {
+    overlay.remove();
+  });
+  
+  // Close overlay when clicking outside
+  document.addEventListener('click', function closeOverlay(e) {
+    if (!overlay.contains(e.target) && e.target !== element) {
+      overlay.remove();
+      document.removeEventListener('click', closeOverlay);
+    }
+  });
+}

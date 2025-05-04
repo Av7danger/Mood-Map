@@ -307,18 +307,29 @@ async function analyzeSentiment(text, options = {}) {
     
     console.log(`Using API with model: ${modelToUse}${options.summarize ? ' with summarization' : ''}`);
     
-    // New: Use specialized endpoint for simple model when appropriate
+    // Get API endpoint
     const cleanApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
     let endpoint = `${cleanApiUrl}/analyze`;
     
-    // For simple model without summarization, use the specialized fast endpoint
+    // For simple model without summarization, use the specialized fast endpoint if available
     if (modelToUse === 'simple' && !options.summarize) {
-      endpoint = `${cleanApiUrl}/extension/analyze_simple`;
+      // Try to use the simple endpoint, but fall back to the main endpoint if it fails
+      try {
+        const testResponse = await fetch(`${cleanApiUrl}/extension/analyze_simple`, {
+          method: 'HEAD'
+        });
+        if (testResponse.ok) {
+          endpoint = `${cleanApiUrl}/extension/analyze_simple`;
+        }
+      } catch (error) {
+        console.log('Simple endpoint not available, using main endpoint');
+      }
     }
     
-    // If summarization is requested, use the advanced endpoint
+    // For summarization requests, always use the /analyze endpoint with advanced model
     if (options.summarize) {
-      endpoint = `${cleanApiUrl}/extension/analyze_advanced`;
+      endpoint = `${cleanApiUrl}/analyze`;
+      console.log('Using main analyze endpoint for summarization request');
     }
     
     // Make API request - the server will lazy-load the required model
@@ -330,8 +341,7 @@ async function analyzeSentiment(text, options = {}) {
       },
       body: JSON.stringify({
         text: text,
-        model_type: modelToUse,
-        summarize: options.summarize || false,
+        model_type: options.summarize ? 'advanced' : modelToUse,
         features: {
           sentiment: true,
           summarization: options.summarize || false

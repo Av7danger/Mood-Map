@@ -275,6 +275,13 @@ document.addEventListener('DOMContentLoaded', function() {
           // Update current tab
           currentTab = tabId;
           console.log(`Switched to tab: ${tabId}`);
+          
+          // Initialize the appropriate tab
+          if (tabId === 'history') {
+            initializeHistoryTab();
+          } else if (tabId === 'visualize') {
+            initializeVisualizationTab();
+          }
         });
       });
       
@@ -521,39 +528,81 @@ document.addEventListener('DOMContentLoaded', function() {
     function processLocalSentiment(text) {
       text = text.toLowerCase();
       
-      const positiveWords = ["love", "amazing", "excellent", "fantastic", "great", "awesome", "happy", "joy"];
-      const negativeWords = ["hate", "terrible", "awful", "horrible", "worst", "bad", "sad", "angry"];
+      // Expanded lists of sentiment words
+      const positiveWords = [
+        "love", "loving", "loved", "likes", "like", "liked", 
+        "amazing", "excellent", "exceptional", "outstanding",
+        "fantastic", "great", "good", "wonderful", "terrific", 
+        "awesome", "happy", "happiness", "joy", "joyful", 
+        "beautiful", "delightful", "pleasant", "glad", 
+        "pleased", "satisfying", "satisfied", "impressive",
+        "perfect", "brilliant", "superb", "splendid", "enjoy"
+      ];
+      
+      const negativeWords = [
+        "hate", "hates", "hated", "hating",
+        "terrible", "awful", "horrible", "worst", 
+        "bad", "disappointing", "disappointed", 
+        "sad", "unhappy", "angry", "furious", "upset", 
+        "annoying", "annoyed", "frustrating", "frustrated",
+        "poor", "mediocre", "inadequate", "inferior",
+        "boring", "worthless", "waste", "disgusting",
+        "dislike", "dislikes", "disliked", "sucks"
+      ];
       
       let positiveCount = 0;
       let negativeCount = 0;
       
-      positiveWords.forEach(word => {
-        if (text.includes(word)) positiveCount++;
+      // Improved word matching using word boundaries
+      const words = text.split(/\b/);
+      
+      // Count positive and negative words
+      words.forEach(word => {
+        word = word.trim();
+        if (word.length < 2) return; // Skip single characters and empty strings
+        
+        if (positiveWords.includes(word)) {
+          positiveCount++;
+          console.log(`Found positive word: ${word}`);
+        }
+        
+        if (negativeWords.includes(word)) {
+          negativeCount++;
+          console.log(`Found negative word: ${word}`);
+        }
       });
       
-      negativeWords.forEach(word => {
-        if (text.includes(word)) negativeCount++;
-      });
+      console.log(`Word counts - Positive: ${positiveCount}, Negative: ${negativeCount}`);
       
       let score = 0;
       let category = 1;
       let label = 'neutral';
       
-      if (positiveCount > negativeCount) {
-        score = 0.5 + (0.5 * (positiveCount / (positiveCount + negativeCount || 1)));
+      // Improved thresholds for sentiment classification
+      if (positiveCount > 0 && positiveCount > negativeCount) {
+        // Calculate positive score based on ratio and strength
+        score = 0.3 + (0.7 * (positiveCount / (positiveCount + negativeCount || 1)));
         category = 2;
         label = 'positive';
-      } else if (negativeCount > positiveCount) {
-        score = -0.5 - (0.5 * (negativeCount / (positiveCount + negativeCount || 1)));
+      } else if (negativeCount > 0 && negativeCount >= positiveCount) {
+        // Calculate negative score based on ratio and strength
+        score = -0.3 - (0.7 * (negativeCount / (positiveCount + negativeCount || 1)));
         category = 0;
         label = 'negative';
+      }
+      
+      // If no sentiment words found, keep as neutral
+      if (positiveCount === 0 && negativeCount === 0) {
+        score = 0;
+        category = 1;
+        label = 'neutral';
       }
       
       return {
         score: score,
         category: category,
         label: label,
-        confidence: 0.6,
+        confidence: positiveCount + negativeCount > 0 ? 0.5 + (0.1 * (positiveCount + negativeCount)) : 0.5,
         model_used: 'simple_offline'
       };
     }
@@ -973,6 +1022,346 @@ document.addEventListener('DOMContentLoaded', function() {
       testApiConnection();
       
       console.log('UI initialization complete');
+    }
+    
+    // Initialize visualization tab
+    function initializeVisualizationTab() {
+      console.log('Initializing visualization tab');
+      
+      // Get filter dropdown
+      const visualizationFilter = getElement('visualization-filter');
+      
+      // Load history from storage and create visualizations
+      safeStorageGet(['analysisHistory'], function(data) {
+        const history = data.analysisHistory || [];
+        
+        if (history.length === 0) {
+          // Show empty state for each visualization panel
+          const emptyMessage = '<div class="empty-visualization-message">No data available. Analyze some text to see visualizations.</div>';
+          document.querySelector('.timeline-container').innerHTML = emptyMessage;
+          document.querySelector('.wordcloud-container').innerHTML = emptyMessage;
+          document.querySelector('.interactive-graph-container').innerHTML = emptyMessage;
+          return;
+        }
+        
+        // Create the visualizations
+        createSentimentTimeline(history);
+        createWordCloud(history);
+        createInteractiveSentimentGraph(history, 'pie'); // Default to pie chart
+        
+        // Set up filter change handler
+        if (visualizationFilter) {
+          visualizationFilter.addEventListener('change', function() {
+            const filteredHistory = filterHistoryByTimeRange(history, visualizationFilter.value);
+            createSentimentTimeline(filteredHistory);
+            createWordCloud(filteredHistory);
+            
+            // Get current graph type
+            const graphType = document.querySelector('input[name="graph-type"]:checked').value;
+            createInteractiveSentimentGraph(filteredHistory, graphType);
+          });
+        }
+        
+        // Set up graph type radio buttons
+        const graphTypeRadios = document.querySelectorAll('input[name="graph-type"]');
+        graphTypeRadios.forEach(radio => {
+          radio.addEventListener('change', function() {
+            const filteredHistory = filterHistoryByTimeRange(history, visualizationFilter.value);
+            createInteractiveSentimentGraph(filteredHistory, this.value);
+          });
+        });
+      });
+    }
+    
+    // Filter history by time range
+    function filterHistoryByTimeRange(history, timeRange) {
+      const now = new Date();
+      
+      switch(timeRange) {
+        case 'today':
+          // Filter for items from today
+          return history.filter(item => {
+            const itemDate = new Date(item.timestamp);
+            return itemDate.getDate() === now.getDate() &&
+                   itemDate.getMonth() === now.getMonth() &&
+                   itemDate.getFullYear() === now.getFullYear();
+          });
+        case 'week':
+          // Filter for items from this week (last 7 days)
+          const weekAgo = new Date(now);
+          weekAgo.setDate(now.getDate() - 7);
+          return history.filter(item => new Date(item.timestamp) >= weekAgo);
+        case 'month':
+          // Filter for items from this month (last 30 days)
+          const monthAgo = new Date(now);
+          monthAgo.setDate(now.getDate() - 30);
+          return history.filter(item => new Date(item.timestamp) >= monthAgo);
+        default:
+          // All history
+          return history;
+      }
+    }
+    
+    // Create sentiment timeline chart
+    function createSentimentTimeline(history) {
+      const container = document.querySelector('.timeline-container');
+      if (!container) return;
+      
+      // Clear previous chart
+      container.innerHTML = '';
+      
+      if (history.length === 0) {
+        container.innerHTML = '<div class="empty-visualization-message">No data available for the selected time range.</div>';
+        return;
+      }
+      
+      // Create canvas element
+      const canvas = document.createElement('canvas');
+      canvas.id = 'sentiment-timeline';
+      container.appendChild(canvas);
+      
+      // Prepare data
+      const timeData = [];
+      const sentimentData = [];
+      
+      // Sort by timestamp
+      history.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+      
+      history.forEach(item => {
+        // Convert timestamp to readable format
+        const date = new Date(item.timestamp);
+        timeData.push(date.toLocaleString());
+        
+        // Convert sentiment to numerical value (-1 to 1)
+        let sentimentValue = 0;
+        if (item.result && item.result.score !== undefined) {
+          sentimentValue = item.result.score;
+        } else if (item.result && item.result.category !== undefined) {
+          // Map category to a score: negative=0, neutral=1, positive=2
+          sentimentValue = item.result.category === 0 ? -0.7 : (item.result.category === 2 ? 0.7 : 0);
+        }
+        
+        sentimentData.push(sentimentValue);
+      });
+      
+      console.log('Timeline data prepared:', timeData.length, 'points');
+      
+      // Create the chart
+      const ctx = canvas.getContext('2d');
+      window.sentimentTimelineChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: timeData,
+          datasets: [{
+            label: 'Sentiment Score',
+            data: sentimentData,
+            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+            borderColor: 'rgba(54, 162, 235, 1)',
+            borderWidth: 2,
+            pointBackgroundColor: sentimentData.map(value => {
+              // Color points based on sentiment: red for negative, gray for neutral, green for positive
+              if (value < -0.3) return 'rgba(255, 99, 132, 1)';
+              if (value > 0.3) return 'rgba(75, 192, 192, 1)';
+              return 'rgba(153, 102, 255, 1)';
+            }),
+            pointBorderColor: '#fff',
+            pointRadius: 5,
+            tension: 0.1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              min: -1,
+              max: 1,
+              ticks: {
+                callback: function(value) {
+                  if (value === -1) return 'Very Negative';
+                  if (value === 0) return 'Neutral';
+                  if (value === 1) return 'Very Positive';
+                  return '';
+                }
+              }
+            },
+            x: {
+              ticks: {
+                maxRotation: 45,
+                minRotation: 45
+              }
+            }
+          },
+          plugins: {
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const value = context.raw;
+                  let sentiment = 'Neutral';
+                  if (value < -0.3) sentiment = 'Negative';
+                  if (value > 0.3) sentiment = 'Positive';
+                  return `Sentiment: ${sentiment} (${value.toFixed(2)})`;
+                },
+                afterLabel: function(context) {
+                  const index = context.dataIndex;
+                  return `Text: ${history[index].text.substring(0, 50)}...`;
+                }
+              }
+            }
+          }
+        }
+      });
+    }
+    
+    // Create word cloud visualization
+    function createWordCloud(history) {
+      const container = document.querySelector('.wordcloud-container');
+      if (!container) return;
+      
+      // Clear previous content
+      container.innerHTML = '';
+      
+      if (history.length === 0) {
+        container.innerHTML = '<div class="empty-visualization-message">No data available for the selected time range.</div>';
+        return;
+      }
+      
+      // Create placeholder message with info about the word cloud being disabled
+      const placeholderDiv = document.createElement('div');
+      placeholderDiv.className = 'word-cloud-placeholder';
+      placeholderDiv.style.textAlign = 'center';
+      placeholderDiv.style.padding = '40px 20px';
+      placeholderDiv.style.color = 'var(--text-secondary)';
+      placeholderDiv.style.fontSize = '14px';
+      placeholderDiv.innerHTML = 'Sentiment Word Cloud has been disabled in this version.';
+      
+      container.appendChild(placeholderDiv);
+      
+      console.log('Word cloud visualization has been disabled');
+    }
+    
+    // Create interactive sentiment graph
+    function createInteractiveSentimentGraph(history, chartType) {
+      const container = document.querySelector('.interactive-graph-container');
+      if (!container) return;
+      
+      // Clear previous chart
+      container.innerHTML = '';
+      
+      if (history.length === 0) {
+        container.innerHTML = '<div class="empty-visualization-message">No data available for the selected time range.</div>';
+        return;
+      }
+      
+      // Create canvas element
+      const canvas = document.createElement('canvas');
+      canvas.id = 'interactive-sentiment-graph';
+      container.appendChild(canvas);
+      
+      console.log('Creating interactive graph with chart type:', chartType);
+      
+      // Count sentiment categories
+      let negativeCount = 0;
+      let neutralCount = 0;
+      let positiveCount = 0;
+      
+      history.forEach(item => {
+        if (item.result && (
+            item.result.category === 0 || 
+            (item.result.score !== undefined && item.result.score < -0.3)
+          )) {
+          negativeCount++;
+        } else if (item.result && (
+            item.result.category === 2 || 
+            (item.result.score !== undefined && item.result.score > 0.3)
+          )) {
+          positiveCount++;
+        } else {
+          neutralCount++;
+        }
+      });
+      
+      console.log(`Sentiment distribution - Positive: ${positiveCount}, Neutral: ${neutralCount}, Negative: ${negativeCount}`);
+      
+      // Only proceed if we have data to show
+      if (positiveCount === 0 && neutralCount === 0 && negativeCount === 0) {
+        container.innerHTML = '<div class="empty-visualization-message">No sentiment data available.</div>';
+        return;
+      }
+      
+      // Fix chart type naming - "polar" should be "polarArea" in Chart.js
+      if (chartType === 'polar') {
+        chartType = 'polarArea';
+      }
+      
+      console.log(`Using corrected chart type: ${chartType}`);
+      
+      // Set up chart config based on type
+      const ctx = canvas.getContext('2d');
+      
+      // Chart configuration
+      let chartConfig = {
+        type: chartType,
+        data: {
+          labels: ['Positive', 'Neutral', 'Negative'],
+          datasets: [{
+            label: 'Sentiment Distribution',
+            data: [positiveCount, neutralCount, negativeCount],
+            backgroundColor: [
+              'rgba(76, 175, 80, 0.7)', // Green for positive
+              'rgba(158, 158, 158, 0.7)', // Gray for neutral
+              'rgba(244, 67, 54, 0.7)' // Red for negative
+            ],
+            borderColor: [
+              'rgba(76, 175, 80, 1)',
+              'rgba(158, 158, 158, 1)',
+              'rgba(244, 67, 54, 1)'
+            ],
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'top',
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const label = context.label || '';
+                  const value = context.raw || 0;
+                  const total = negativeCount + neutralCount + positiveCount;
+                  const percentage = Math.round((value / total) * 100);
+                  return `${label}: ${value} (${percentage}%)`;
+                }
+              }
+            }
+          }
+        }
+      };
+      
+      // Customize options based on chart type
+      if (chartType === 'radar' || chartType === 'polarArea') {
+        chartConfig.options.scales = {
+          r: {
+            min: 0,
+            ticks: {
+              display: false
+            }
+          }
+        };
+      }
+      
+      // Create the chart
+      try {
+        window.interactiveSentimentChart = new Chart(ctx, chartConfig);
+        console.log('Interactive chart created successfully');
+      } catch (error) {
+        console.error('Error creating chart:', error);
+        container.innerHTML = `<div class="empty-visualization-message">Error creating chart: ${error.message}</div>`;
+      }
     }
     
     // Start initialization
