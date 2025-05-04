@@ -1,502 +1,653 @@
-// MoodMap Browser Extension Background Script
-// Handles API communication with the sentiment analysis backend
+// Background service worker for MoodMap extension
+console.log("MoodMap background script initializing...");
 
-// Configuration
-const DEFAULT_API_URL = "http://localhost:5000"; // Updated to correct port 5000
-let API_URL = DEFAULT_API_URL;
-let preferredModel = 'ensemble'; // Default to ensemble which is our best model
-const API_TIMEOUT_MS = 8000; // 8 second timeout for API calls
-let availableModels = {ensemble: true, simple: true}; // Default to ensure at least ensemble is available
-let apiAvailable = false; // Track API availability
+// Global error handler for extension context invalidation
+let extensionContextValid = true;
 
-// Function to check if API is currently available
-function isApiAvailable() {
-  return apiAvailable;
-}
-
-// Initialize extension on install
-chrome.runtime.onInstalled.addListener(() => {
-  console.log("MoodMap extension installed");
-  
-  // Initialize storage with default settings if not set
-  chrome.storage.local.set({ 
-    defaultModel: 'ensemble',
-    apiUrl: DEFAULT_API_URL,
-    apiStatus: 'unknown',
-    availableModels: {ensemble: true, simple: true}
-  }, () => {
-    console.log("Settings initialized with:", { 
-      defaultModel: 'ensemble', 
-      apiUrl: DEFAULT_API_URL 
-    });
-  });
-  
-  // Create context menu item
-  chrome.contextMenus.create({
-    id: "analyzeWithMoodMap",
-    title: "Analyze with Mood Map",
-    contexts: ["selection"]
-  });
+// Listen for extension context invalidation
+chrome.runtime.onSuspend.addListener(() => {
+  console.log("Extension context being suspended, marking as invalid");
+  extensionContextValid = false;
 });
 
-// Load settings and check API on service worker startup
-chrome.storage.local.get(['defaultModel', 'apiUrl', 'apiStatus'], (result) => {
-  if (result.defaultModel) {
-    preferredModel = result.defaultModel;
-    console.log("Loaded preferred model:", preferredModel);
-  }
-  
-  if (result.apiUrl) {
-    API_URL = result.apiUrl;
-    console.log("Loaded API URL:", API_URL);
-  }
-  
-  if (result.apiStatus === 'online') {
-    apiAvailable = true;
-  }
-  
-  // Check API and available models on startup
-  checkApiAndModels();
-  
-  // Log the configured values
-  console.log("Mood Map configuration loaded:", { 
-    apiUrl: API_URL, 
-    defaultModel: preferredModel 
-  });
-});
-
-// Function to check API and available models
-function checkApiAndModels() {
-  console.log("Checking API health at:", `${API_URL}/health`);
-  
-  fetchWithTimeout(`${API_URL}/health`, {
-    method: 'GET'
-  }, 5000)
-  .then(response => {
-    if (!response.ok) {
-      throw new Error(`API returned ${response.status}`);
+// Wrapper for chrome API calls to check for invalid context
+function safeChromeApiCall(apiCall) {
+  return function(...args) {
+    if (!extensionContextValid) {
+      console.warn("Extension context invalidated, skipping API call");
+      return Promise.reject(new Error("Extension context invalidated"));
     }
-    return response.json();
-  })
-  .then(data => {
-    console.log("API health check successful:", data);
-    apiAvailable = true;
     
-    // Store available models from API
-    if (data.models_status) {
-      availableModels = data.models_status;
-      // Always keep simple model available as it works offline
-      availableModels.simple = true;
-      
-      // If preferred model is not available, switch to ensemble or simple
-      if (!availableModels[preferredModel]) {
-        preferredModel = availableModels.ensemble ? 'ensemble' : 'simple';
-        chrome.storage.local.set({ defaultModel: preferredModel });
-        console.log(`Preferred model switched to ${preferredModel} based on availability`);
+    try {
+      return apiCall(...args);
+    } catch (e) {
+      if (e.message.includes("Extension context invalidated")) {
+        extensionContextValid = false;
+        console.warn("Extension context invalidated during API call");
       }
-      
-      // Store available models in storage for popup
-      chrome.storage.local.set({ 
-        availableModels: availableModels,
-        apiStatus: 'online'
-      });
+      throw e;
     }
-  })
-  .catch(error => {
-    console.error("API health check failed:", error.message);
-    apiAvailable = false;
+  };
+}
+
+// Wrap chrome API calls that could fail due to extension context invalidation
+// Define these before using them below
+const safeStorageGet = (keys, callback) => {
+  try {
+    chrome.storage.local.get(keys, (result) => {
+      if (chrome.runtime.lastError) {
+        console.error("Storage get error:", chrome.runtime.lastError);
+        if (chrome.runtime.lastError.message.includes("Extension context invalidated")) {
+          extensionContextValid = false;
+        }
+        callback({});
+      } else {
+        callback(result);
+      }
+    });
+  } catch (error) {
+    console.error("Error in storage get:", error);
+    if (error.message.includes("Extension context invalidated")) {
+      extensionContextValid = false;
+    }
+    callback({});
+  }
+};
+
+const safeStorageSet = (items, callback) => {
+  try {
+    chrome.storage.local.set(items, () => {
+      if (chrome.runtime.lastError) {
+        console.error("Storage set error:", chrome.runtime.lastError);
+        if (chrome.runtime.lastError.message.includes("Extension context invalidated")) {
+          extensionContextValid = false;
+        }
+      }
+      if (callback) callback();
+    });
+  } catch (error) {
+    console.error("Error in storage set:", error);
+    if (error.message.includes("Extension context invalidated")) {
+      extensionContextValid = false;
+    }
+    if (callback) callback();
+  }
+};
+
+const safeTabsSendMessage = (tabId, message) => {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.tabs.sendMessage(tabId, message, (response) => {
+        if (chrome.runtime.lastError) {
+          console.warn("Tab message error:", chrome.runtime.lastError);
+          reject(chrome.runtime.lastError);
+        } else {
+          resolve(response);
+        }
+      });
+    } catch (error) {
+      console.error("Error sending tab message:", error);
+      reject(error);
+    }
+  });
+};
+
+// Debug network request function - defined at the top to avoid reference errors
+function debugNetworkRequest(details) {
+  console.log("Network request:", details);
+  return details;
+}
+
+// Global error handler for unhandled exceptions
+self.onerror = function(message, source, lineno, colno, error) {
+  console.error("Unhandled error in background script:", message, error);
+  
+  // If the error is about extension context, mark it as invalid
+  if (message && message.includes && message.includes("Extension context invalidated")) {
+    extensionContextValid = false;
+    console.warn("Extension context has been invalidated, will require reload");
+  }
+  
+  return true;
+};
+
+// Listen for requests from content scripts and popup
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  try {
+    console.log("Background script received message:", request);
     
-    chrome.storage.local.set({ 
-      apiStatus: 'offline',
-      availableModels: { simple: true } // Only simple model works offline
+    // Check if extension context is valid before proceeding
+    if (!extensionContextValid) {
+      console.warn("Extension context invalidated, cannot process message");
+      sendResponse({ error: "Extension context invalidated. Please reload the extension." });
+      return false;
+    }
+
+    // Respond to ping messages immediately (for testing communication)
+    if (request.type === 'ping') {
+      console.log("Received ping, sending response");
+      sendResponse({ type: 'pong', status: 'alive', timestamp: Date.now() });
+      return true;
+    }
+    
+    // Handle different message types
+    if (request.type === 'analyzeSentiment') {
+      // Process sentiment analysis request
+      analyzeSentiment(request.text, request.options)
+        .then(result => {
+          console.log("Analysis result:", result);
+          if (extensionContextValid) {
+            sendResponse(result);
+          }
+        })
+        .catch(error => {
+          console.error("Error in sentiment analysis:", error);
+          if (extensionContextValid) {
+            sendResponse({ error: error.message });
+          }
+        });
+      
+      // Return true to indicate we'll send a response asynchronously
+      return true;
+    }
+    
+    else if (request.type === 'updateDefaultModel') {
+      // Update the default model setting
+      safeStorageSet({ selectedModel: request.model }, () => {
+        if (extensionContextValid) {
+          sendResponse({ success: true, model: request.model });
+        }
+      });
+      
+      // Return true to indicate we'll send a response asynchronously
+      return true;
+    }
+    
+    else if (request.type === 'getNetworkRequest') {
+      // This is a debug function to get network request data
+      sendResponse({ 
+        success: true, 
+        message: "Network request monitoring is active"
+      });
+      
+      return true;
+    }
+    
+    else if (request.type === 'getBackgroundStatus') {
+      // Used to check if background script is running properly
+      getStoredSettings().then(settings => {
+        if (extensionContextValid) {
+          sendResponse({
+            status: "OK",
+            timestamp: Date.now(),
+            apiUrl: settings.apiUrl,
+            model: settings.selectedModel,
+            apiStatus: settings.apiStatus
+          });
+        }
+      });
+      return true;
+    }
+    
+    // For unhandled message types
+    sendResponse({ error: "Unhandled message type", type: request.type });
+    return true;
+  } catch (error) {
+    console.error("Error handling message:", error);
+    
+    // Check for extension context invalidation
+    if (error.message.includes("Extension context invalidated")) {
+      extensionContextValid = false;
+      console.warn("Extension context has been invalidated");
+    }
+    
+    // Try to send error response
+    try {
+      sendResponse({ error: error.message });
+    } catch (responseError) {
+      console.error("Could not send error response:", responseError);
+    }
+    
+    return false;
+  }
+});
+
+// Create context menu for analyzing selected text
+chrome.runtime.onInstalled.addListener(() => {
+  try {
+    chrome.contextMenus.create({
+      id: "analyzeSentiment",
+      title: "Analyze sentiment with MoodMap",
+      contexts: ["selection"]
     });
     
-    // Default to simple model when API is down
-    preferredModel = 'simple';
-    chrome.storage.local.set({ defaultModel: 'simple' });
+    console.log("MoodMap: Created context menu for sentiment analysis");
+    
+    // Initialize default settings if not already set
+    safeStorageGet(['apiUrl', 'selectedModel'], (data) => {
+      if (!data.apiUrl) {
+        safeStorageSet({ apiUrl: 'http://localhost:5000' });
+      }
+      if (!data.selectedModel) {
+        safeStorageSet({ selectedModel: 'simple' });
+      }
+      console.log("Initialized default settings:", data);
+    });
+
+    // Preload all available models
+    getStoredSettings().then(settings => {
+      preloadAllModels(settings.apiUrl);
+    });
+  } catch (e) {
+    console.error("Error during installation:", e);
+  }
+});
+
+// Listen for context menu clicks
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === "analyzeSentiment" && info.selectionText) {
+    // Send the selected text to the content script for analysis
+    safeTabsSendMessage(tab.id, {
+      type: "analyzeSelectedText",
+      text: info.selectionText
+    }).catch(error => {
+      console.error("Error sending message to content script:", error);
+      // If content script is not available, try to analyze directly
+      analyzeAndShowNotification(info.selectionText);
+    });
+    
+    console.log("Sent selected text for analysis:", info.selectionText.substring(0, 50) + "...");
+  }
+});
+
+// Function to show analysis result in a notification if content script isn't available
+function analyzeAndShowNotification(text) {
+  analyzeSentiment(text).then(result => {
+    let sentimentText = "Neutral";
+    if (result.sentiment < -0.3) sentimentText = "Negative";
+    else if (result.sentiment > 0.3) sentimentText = "Positive";
+    
+    chrome.notifications.create({
+      type: "basic",
+      iconUrl: chrome.runtime.getURL("assets/icon128.png"),
+      title: "MoodMap Sentiment Analysis",
+      message: `The text has a ${sentimentText} sentiment (Score: ${result.sentiment.toFixed(2)})`
+    });
   });
 }
 
-// Helper function for fetch with timeout
-async function fetchWithTimeout(url, options, timeoutMs) {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeoutMs);
+// Function to analyze sentiment using the API or local processing
+async function analyzeSentiment(text, options = {}) {
+  console.log("Analyzing sentiment for text:", text.substring(0, 50) + "...", "options:", options);
   
   try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal
-    });
-    clearTimeout(id);
-    return response;
-  } catch (error) {
-    clearTimeout(id);
-    if (error.name === 'AbortError') {
-      throw new Error('Request timeout');
+    // Get settings from storage
+    const { apiUrl, selectedModel, apiStatus } = await getStoredSettings();
+    
+    // Get model to use - either from options or from stored settings
+    const modelToUse = options.model || selectedModel;
+    
+    // Optimize for short text analysis - always use simple model for very short text
+    if (text.length < 30 && !text.includes('?') && !options.summarize) {
+      console.log('Using offline processing with simple model (short text optimization)');
+      return processSimpleAnalysis(text);
     }
-    throw error;
+    
+    // Only use simple model if explicitly selected and not summarizing
+    if (modelToUse === 'simple' && !options.summarize) {
+      console.log('Using offline processing with simple model (user selected)');
+      return processSimpleAnalysis(text);
+    }
+    
+    // If API is known to be offline and summarization is not requested, fall back to simple model
+    if (apiStatus === 'offline' && !options.summarize) {
+      console.log('API is offline, falling back to simple model');
+      return processSimpleAnalysis(text);
+    }
+    
+    console.log(`Using API with model: ${modelToUse}${options.summarize ? ' with summarization' : ''}`);
+    
+    // New: Use specialized endpoint for simple model when appropriate
+    const cleanApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
+    let endpoint = `${cleanApiUrl}/analyze`;
+    
+    // For simple model without summarization, use the specialized fast endpoint
+    if (modelToUse === 'simple' && !options.summarize) {
+      endpoint = `${cleanApiUrl}/extension/analyze_simple`;
+    }
+    
+    // If summarization is requested, use the advanced endpoint
+    if (options.summarize) {
+      endpoint = `${cleanApiUrl}/extension/analyze_advanced`;
+    }
+    
+    // Make API request - the server will lazy-load the required model
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        text: text,
+        model_type: modelToUse,
+        summarize: options.summarize || false,
+        features: {
+          sentiment: true,
+          summarization: options.summarize || false
+        }
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`API returned ${response.status}: ${response.statusText}`);
+    }
+    
+    const result = await response.json();
+    console.log("API returned result:", result);
+    
+    // Update API status to online since we got a successful response
+    safeStorageSet({ apiStatus: 'online' });
+    
+    // Add loading info if available
+    if (result.model_loading_time) {
+      result.modelWasJustLoaded = true;
+      result.loadingTimeSeconds = result.model_loading_time;
+    }
+    
+    return result;
+    
+  } catch (error) {
+    console.error("Error analyzing sentiment:", error);
+    
+    // Mark API as offline if we couldn't connect
+    if (error.message.includes('Failed to fetch') || 
+        error.message.includes('NetworkError') ||
+        error.message.includes('ECONNREFUSED')) {
+      console.log('API connection failed, marking as offline');
+      safeStorageSet({ apiStatus: 'offline' });
+    }
+    
+    // Only fall back to simple analysis when not summarizing
+    if (!options.summarize) {
+      console.log("Falling back to offline processing due to error");
+      return processSimpleAnalysis(text);
+    }
+    
+    // Return error response for summarization requests
+    return {
+      error: "Could not connect to backend for advanced analysis and summarization",
+      sentiment: 0,
+      category: 1,
+      label: "neutral",
+      confidence: 0.5
+    };
   }
 }
 
-// Handle context menu clicks
-chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId === "analyzeWithMoodMap" && info.selectionText) {
-    console.log("Context menu clicked, sending text to content script");
-    // Send message to content script with the selected text
-    chrome.tabs.sendMessage(tab.id, {
-      type: 'analyzeSelectedText',
-      text: info.selectionText
-    });
+// Simple offline text analysis
+function processSimpleAnalysis(text) {
+  console.log("Processing with simple offline analysis");
+  text = text.toLowerCase();
+  
+  // Check for obviously positive sentiment
+  const positiveWords = ["love", "amazing", "excellent", "fantastic", "great", "awesome", "happy", "joy"];
+  const negativeWords = ["hate", "terrible", "awful", "horrible", "worst", "bad", "sad", "angry"];
+  
+  let positiveCount = 0;
+  let negativeCount = 0;
+  
+  positiveWords.forEach(word => {
+    if (text.includes(word)) positiveCount++;
+  });
+  
+  negativeWords.forEach(word => {
+    if (text.includes(word)) negativeCount++;
+  });
+  
+  let sentiment = 0;
+  let category = 1;
+  let label = 'neutral';
+  
+  if (positiveCount > negativeCount) {
+    sentiment = 0.5 + (0.5 * (positiveCount / (positiveCount + negativeCount)));
+    category = 2;
+    label = 'positive';
+  } else if (negativeCount > positiveCount) {
+    sentiment = -0.5 - (0.5 * (negativeCount / (positiveCount + negativeCount)));
+    category = 0;
+    label = 'negative';
   }
-});
+  
+  return {
+    sentiment: sentiment,
+    category: category,
+    label: label,
+    confidence: 0.6,
+    emotions: {}
+  };
+}
 
-// Message handling from content scripts and popup
-// FIXED: Modified message handler to properly support asynchronous responses
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log("Background script received message:", request.type);
-  
-  if (request.type === 'analyzeSelectedText' || request.type === 'analyzeSentiment') {
-    const text = request.text;
-    const model = request.model || preferredModel; // Use specified model or default
-    
-    if (!text || text.trim() === '') {
-      console.log("Empty text received for analysis");
-      sendResponse({ error: "No text provided for analysis" });
-      return true;
-    }
-    
-    console.log(`Analyzing text (${text.length} chars) with model: ${model}`);
-    
-    // Choose between online API analysis or offline analysis
-    if (model === 'simple' || !isApiAvailable()) {
-      // Use offline analysis for simple model or if API is down
-      const result = performOfflineSentimentAnalysis(text);
-      console.log("Offline analysis result:", result);
-      sendResponse(result);
-    } else {
-      // Use Promise to handle the async API call
-      (async () => {
-        try {
-          const response = await fetchWithTimeout(`${API_URL}/analyze`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ 
-              text: text,
-              model_type: model // Use model_type parameter name
-            })
-          }, API_TIMEOUT_MS);
-          
-          if (!response.ok) {
-            console.error(`API error status: ${response.status}`);
-            throw new Error(`API error: ${response.status}`);
-          }
-          
-          const data = await response.json();
-          console.log("Sentiment analysis result:", data);
-          // Convert API response to a consistent format if needed
-          const result = formatApiResponse(data);
-          sendResponse(result);
-        } catch (error) {
-          console.error("Error in sentiment analysis:", error.message);
-          // Fall back to offline analysis if API fails
-          const fallbackResult = performOfflineSentimentAnalysis(text);
-          sendResponse(fallbackResult);
-        }
-      })();
-      
-      return true; // Keep the message channel open for async response
-    }
-    
-    return true; // Keep the message channel open for async response
-  }
-  
-  else if (request.type === 'summarizeText') {
-    const text = request.text;
-    const sentiment = request.sentiment_category;
-    
-    // Skip summarization if API is not available
-    if (!isApiAvailable()) {
-      sendResponse({ 
-        error: "API not available",
-        summary: "Summarization requires API connection."
+// Helper function to safely get stored settings
+async function getStoredSettings() {
+  try {
+    const data = await new Promise((resolve, reject) => {
+      safeStorageGet(['apiUrl', 'selectedModel', 'apiStatus'], (result) => {
+        resolve(result);
       });
-      return true;
+    });
+    
+    return {
+      apiUrl: data.apiUrl || 'http://localhost:5000',
+      selectedModel: data.selectedModel || 'simple',
+      apiStatus: data.apiStatus || 'unknown'
+    };
+  } catch (error) {
+    console.error("Error getting stored settings:", error);
+    
+    // If there's a context invalidated error, mark the context
+    if (error.message && error.message.includes("Extension context invalidated")) {
+      extensionContextValid = false;
     }
     
-    // Use Promise for async handling
-    (async () => {
+    // Return defaults
+    return {
+      apiUrl: 'http://localhost:5000',
+      selectedModel: 'simple',
+      apiStatus: 'unknown'
+    };
+  }
+}
+
+// Monitor network requests for debugging
+try {
+  chrome.webRequest.onSendHeaders.addListener(
+    debugNetworkRequest,
+    { urls: ["*://localhost/*", "*://127.0.0.1/*"] }
+  );
+} catch (e) {
+  console.error("Error setting up webRequest listener:", e);
+}
+
+// Set periodic health check
+setInterval(() => {
+  console.log("Running periodic health check");
+  
+  // Check API health if necessary
+  getStoredSettings().then(settings => {
+    // Only check API if not using simple model
+    if (settings.selectedModel !== 'simple') {
+      checkApiHealth(settings.apiUrl);
+    }
+  });
+}, 5 * 60 * 1000); // Every 5 minutes
+
+// Function to check API health with enhanced status information
+async function checkApiHealth(apiUrl) {
+  try {
+    const cleanApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
+    
+    // Use the new extension-specific status endpoint that provides detailed information
+    const response = await fetch(`${cleanApiUrl}/extension/status`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        check_offline_available: true,
+        require_advanced_features: false,
+        client_info: {
+          client_type: "browser_extension",
+          version: chrome.runtime.getManifest().version,
+          platform: "web"
+        }
+      })
+    });
+    
+    if (response.ok) {
+      const statusData = await response.json();
+      console.log("API enhanced status:", statusData);
+      
+      // Store detailed API status information
+      safeStorageSet({ 
+        apiStatus: 'online',
+        lastHealthCheckTime: Date.now(),
+        availableModels: statusData.available_models || [],
+        loadedModels: statusData.loaded_models || [],
+        modelLoadingStatus: statusData.model_loading_status || {},
+        recommendedModel: statusData.recommended_model || 'simple',
+        apiVersion: statusData.api_version
+      });
+      
+      // If API recommends a different model than currently selected, consider switching
+      getStoredSettings().then(settings => {
+        if (settings.selectedModel !== 'simple' && 
+            !statusData.loaded_models.includes(settings.selectedModel) && 
+            statusData.recommended_model && 
+            statusData.recommended_model !== settings.selectedModel) {
+          
+          console.log(`API recommends switching from ${settings.selectedModel} to ${statusData.recommended_model}`);
+          
+          // Don't auto-switch to simple if user selected a more advanced model
+          // This avoids downgrading the user experience without their consent
+          if (statusData.recommended_model !== 'simple') {
+            safeStorageSet({ 
+              recommendedModelSwitch: statusData.recommended_model,
+              recommendedModelReason: "API recommendation for better performance"
+            });
+          }
+        }
+      });
+      
+    } else {
+      // Fall back to basic status
+      safeStorageSet({ apiStatus: 'offline' });
+      console.log("API health check failed with status:", response.status);
+    }
+  } catch (error) {
+    safeStorageSet({ apiStatus: 'offline' });
+    console.error("API health check error:", error);
+  }
+}
+
+// Function to preload all available models from the API server
+async function preloadAllModels(apiUrl) {
+  try {
+    console.log("Starting to preload all sentiment analysis models...");
+    const cleanApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
+    
+    // Step 1: Check which models are available via the extension status endpoint
+    const statusResponse = await fetch(`${cleanApiUrl}/extension/status`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        check_offline_available: true,
+        require_advanced_features: true
+      })
+    });
+    
+    if (!statusResponse.ok) {
+      throw new Error(`API status check failed: ${statusResponse.status}`);
+    }
+    
+    const statusData = await statusResponse.json();
+    console.log("Available models:", statusData.available_models);
+    
+    // Models to load (exclude 'simple' as it's always available)
+    const modelsToLoad = statusData.available_models.filter(model => 
+      model !== 'simple' && !statusData.loaded_models.includes(model)
+    );
+    
+    if (modelsToLoad.length === 0) {
+      console.log("All models are already loaded, no preloading needed");
+      return { success: true, status: "all_models_already_loaded" };
+    }
+    
+    console.log(`Models to preload: ${modelsToLoad.join(', ')}`);
+    
+    // Step 2: Request each model to load one by one
+    const results = {};
+    
+    for (const model of modelsToLoad) {
+      console.log(`Preloading model: ${model}`);
+      
       try {
-        const response = await fetchWithTimeout(`${API_URL}/summarize`, {
+        // Use the load-model endpoint to explicitly load the model
+        const loadResponse = await fetch(`${cleanApiUrl}/load-model`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ 
-            text: text,
-            sentiment: sentiment
+          body: JSON.stringify({
+            model_type: model,
+            wait_for_loading: false  // Don't block on loading, start it in background
           })
-        }, API_TIMEOUT_MS);
-        
-        if (!response.ok) {
-          throw new Error(`API error: ${response.status}`);
-        }
-        
-        const data = await response.json();
-        console.log("Summarization result:", data);
-        sendResponse(data);
-      } catch (error) {
-        console.error("Error in summarization:", error.message);
-        sendResponse({ 
-          error: error.message,
-          summary: "Could not generate summary. Try again later."
         });
-      }
-    })();
-    
-    return true; // Keep the message channel open for async response
-  }
-  
-  else if (request.type === 'updateApiUrl') {
-    const newUrl = request.url;
-    API_URL = newUrl;
-    chrome.storage.local.set({ apiUrl: newUrl });
-    
-    // Use Promise for async handling
-    (async () => {
-      try {
-        const response = await fetchWithTimeout(`${newUrl}/health`, {
-          method: 'GET'
-        }, API_TIMEOUT_MS);
         
-        if (!response.ok) {
-          throw new Error(`API error: ${response.status}`);
+        if (loadResponse.ok) {
+          const loadResult = await loadResponse.json();
+          console.log(`Model ${model} loading triggered:`, loadResult);
+          results[model] = loadResult.status || "loading_started";
+        } else {
+          console.warn(`Failed to load model ${model}: ${loadResponse.status}`);
+          results[model] = "load_failed";
         }
-        
-        const data = await response.json();
-        apiAvailable = true;
-        chrome.storage.local.set({ apiStatus: 'online' });
-        sendResponse({ success: true, message: "API URL updated and connection verified" });
       } catch (error) {
-        console.error("Error connecting to API:", error.message);
-        apiAvailable = false;
-        chrome.storage.local.set({ apiStatus: 'offline' });
-        sendResponse({ success: false, error: error.message });
+        console.error(`Error loading model ${model}:`, error);
+        results[model] = "error";
       }
-    })();
-    
-    return true; // Keep the message channel open for async response
-  }
-  
-  else if (request.type === 'checkBackend') {
-    checkApiAndModels();
-    
-    // Use Promise for async handling
-    (async () => {
-      try {
-        const response = await fetchWithTimeout(`${API_URL}/health`, {
-          method: 'GET'
-        }, 5000);
-        
-        if (!response.ok) {
-          throw new Error(`API error: ${response.status}`);
-        }
-        
-        const data = await response.json();
-        apiAvailable = true;
-        chrome.storage.local.set({ apiStatus: 'online' });
-        sendResponse({ isAvailable: true, models: data.models_status });
-      } catch (error) {
-        console.error("Error checking API:", error.message);
-        apiAvailable = false;
-        chrome.storage.local.set({ apiStatus: 'offline' });
-        sendResponse({ isAvailable: false, error: error.message });
-      }
-    })();
-    
-    return true; // Keep the message channel open for async response
-  }
-  
-  else if (request.type === 'updateDefaultModel') {
-    // Update the preferred model only if it's available
-    if (request.model === 'simple' || availableModels[request.model]) {
-      preferredModel = request.model;
-      chrome.storage.local.set({ defaultModel: request.model });
-      console.log("Default model updated to:", preferredModel);
-      sendResponse({ success: true });
-    } else {
-      console.error(`Requested model ${request.model} is not available`);
-      sendResponse({ success: false, error: "Model not available" });
+      
+      // Short delay between model loading requests to avoid overloading the server
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
-    return true;
-  }
-  
-  else if (request.type === 'getPreferredModel') {
-    // Return the current preferred model and available models
-    sendResponse({ 
-      model: preferredModel, 
-      availableModels: availableModels,
-      apiStatus: apiAvailable ? 'online' : 'offline'
+    
+    // Store the model loading status
+    safeStorageSet({ 
+      modelLoadingStatus: results,
+      lastModelLoadingTime: Date.now()
     });
-    return true;
+    
+    return {
+      success: true,
+      status: "loading_triggered",
+      models: results
+    };
+  } catch (error) {
+    console.error("Error preloading models:", error);
+    return {
+      success: false,
+      error: error.message
+    };
   }
+}
+
+// Run initial health check
+getStoredSettings().then(settings => {
+  checkApiHealth(settings.apiUrl);
 });
 
-// Function to keep content script ready 
-function keepAlive() {
-  setInterval(() => {
-    console.log("Background service worker keeping alive");
-    // Periodically check API availability
-    if (Math.random() < 0.2) {  // 20% chance to avoid too many requests
-      checkApiAndModels();
-    }
-  }, 30000);  // Every 30 seconds
-}
-
-keepAlive();
-
-// Improved offline sentiment analysis
-function performOfflineSentimentAnalysis(text) {
-  console.log('Performing offline sentiment analysis');
-  
-  const positiveWords = ['good', 'great', 'excellent', 'happy', 'love', 'nice', 
-                         'wonderful', 'awesome', 'fantastic', 'positive', 'best',
-                         'amazing', 'brilliant', 'perfect', 'delighted', 'joy',
-                         'beautiful', 'favorite', 'liked', 'win', 'winning'];
-                         
-  const negativeWords = ['bad', 'terrible', 'awful', 'sad', 'hate', 'poor', 
-                         'negative', 'horrible', 'wrong', 'fail', 'worst',
-                         'disappointed', 'frustrating', 'useless', 'annoying',
-                         'dislike', 'problem', 'difficult', 'trouble', 'worry'];
-  
-  let positiveScore = 0;
-  let negativeScore = 0;
-  
-  // Convert to lowercase for case-insensitive matching
-  text = text.toLowerCase();
-  
-  // Count positive words
-  positiveWords.forEach(word => {
-    const regex = new RegExp('\\b' + word + '\\b', 'gi');
-    const matches = text.match(regex);
-    if (matches) positiveScore += matches.length;
-  });
-  
-  // Count negative words
-  negativeWords.forEach(word => {
-    const regex = new RegExp('\\b' + word + '\\b', 'gi');
-    const matches = text.match(regex);
-    if (matches) negativeScore += matches.length;
-  });
-  
-  // Calculate overall sentiment
-  let sentimentScore = 0;
-  if (positiveScore === 0 && negativeScore === 0) {
-    sentimentScore = 50; // Neutral if no sentiment words found
-  } else {
-    const total = positiveScore + negativeScore;
-    sentimentScore = Math.round((positiveScore / total) * 100);
-  }
-  
-  // Map to 3-category system (0=negative, 1=neutral, 2=positive)
-  let prediction = 1; // Default to neutral
-  if (sentimentScore >= 60) prediction = 2;  // Positive
-  else if (sentimentScore <= 40) prediction = 0;  // Negative
-  
-  // Map sentiment score to text label
-  let sentimentLabel = 'Neutral';
-  if (prediction === 2) sentimentLabel = 'Positive';
-  else if (prediction === 0) sentimentLabel = 'Negative';
-  
-  return {
-    sentiment: sentimentLabel,
-    prediction: prediction,
-    sentiment_percentage: sentimentScore,
-    label: sentimentLabel,
-    score: (sentimentScore - 50) / 50, // Convert 0-100 to -1 to 1
-    offline: true
-  };
-}
-
-// Format API response to ensure consistency
-function formatApiResponse(data) {
-  // If response is already in our expected format, return as is
-  if (data.sentiment && data.prediction !== undefined) {
-    return data;
-  }
-  
-  // Create formatted response from various API response formats
-  let result = {
-    offline: false
-  };
-  
-  // Extract sentiment label
-  if (data.label) {
-    result.sentiment = data.label;
-    result.label = data.label;
-  } else if (data.sentiment) {
-    result.label = data.sentiment;
-  } else {
-    result.sentiment = 'Neutral';
-    result.label = 'Neutral';
-  }
-  
-  // Extract prediction value (0=negative, 1=neutral, 2=positive)
-  if (data.prediction !== undefined) {
-    result.prediction = data.prediction;
-  } else if (data.category !== undefined) {
-    result.prediction = data.category;
-  } else if (data.score !== undefined) {
-    // Convert -1 to 1 score to category
-    const score = data.score;
-    if (score < -0.3) result.prediction = 0;
-    else if (score > 0.3) result.prediction = 2;
-    else result.prediction = 1;
-  } else {
-    result.prediction = 1; // Default to neutral
-  }
-  
-  // Extract or calculate score
-  if (data.score !== undefined) {
-    result.score = data.score;
-  } else if (data.sentiment_percentage !== undefined) {
-    result.score = (data.sentiment_percentage - 50) / 50; // Convert 0-100 to -1 to 1
-  } else if (data.prediction !== undefined) {
-    // Convert prediction to approximate score
-    switch(data.prediction) {
-      case 0: result.score = -0.7; break; // Negative
-      case 2: result.score = 0.7; break;  // Positive
-      default: result.score = 0; break;   // Neutral
-    }
-  }
-  
-  // Extract or calculate percentage
-  if (data.sentiment_percentage !== undefined) {
-    result.sentiment_percentage = data.sentiment_percentage;
-  } else if (data.score !== undefined) {
-    result.sentiment_percentage = Math.round((data.score + 1) / 2 * 100);
-  } else if (data.prediction !== undefined) {
-    // Convert prediction to approximate percentage
-    switch(data.prediction) {
-      case 0: result.sentiment_percentage = 25; break; // Negative
-      case 2: result.sentiment_percentage = 75; break; // Positive
-      default: result.sentiment_percentage = 50; break; // Neutral
-    }
-  }
-  
-  return result;
-}
-
-// Helper function to get API URL
-function getApiUrl(endpoint) {
-  // Ensure endpoint starts with a slash
-  if (!endpoint.startsWith('/')) {
-    endpoint = '/' + endpoint;
-  }
-  
-  // Remove trailing slash from API_URL if present
-  const baseUrl = API_URL.endsWith('/') ? API_URL.slice(0, -1) : API_URL;
-  
-  return `${baseUrl}${endpoint}`;
-}
+// Log initialization complete
+console.log("MoodMap background script initialized successfully");

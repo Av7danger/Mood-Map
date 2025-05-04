@@ -5,6 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="popup.css" />
     <title>Mood Map - Sentiment Analysis</title>
+    <style>
+      /* Inline critical CSS to ensure loading screen isn't stuck */
+      #content {
+        display: block !important;
+      }
+      #loading {
+        display: none !important;
+      }
+    </style>
     <!-- Using local library files instead of CDN links to avoid CSP errors -->
     <script src="lib/chart.js"></script>
     <script src="lib/d3.js"></script>
@@ -16,7 +25,7 @@
       <div class="loading-text">Loading Mood Map...</div>
     </div>
     
-    <div id="content" style="display: none;">
+    <div id="content">
       <header>
         <h1 class="title">Mood Map</h1>
         <p class="subtitle">Sentiment Analysis Tool</p>
