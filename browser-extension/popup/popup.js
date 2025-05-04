@@ -471,19 +471,34 @@ document.addEventListener('DOMContentLoaded', function() {
       
       // Show loading state
       const sentimentLabel = getElement('sentiment-label');
+      const summaryContainer = getElement('summary-container');
+      const summaryText = getElement('summary-text');
+      
       if (sentimentLabel) {
         sentimentLabel.textContent = 'Analyzing...';
+      }
+      
+      if (summaryText) {
+        summaryText.textContent = 'Generating summary...';
+      }
+      
+      if (summaryContainer) {
+        summaryContainer.style.display = 'block';
       }
       
       // Check if we should use API or local processing
       if (modelType === 'simple') {
         // Use simple offline processing
         const result = processLocalSentiment(text);
+        
+        // Generate a simple summary for offline mode
+        result.summary = generateSimpleSummary(text);
+        
         updateResultDisplay(result);
         saveAnalysisToHistory(text, result);
       } else {
-        // Use API for processing
-        fetch(getApiUrl('analyze'), {
+        // Use the combined endpoint for sentiment and summary
+        fetch(getApiUrl('extension/analyze-with-summary'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -518,10 +533,29 @@ document.addEventListener('DOMContentLoaded', function() {
           
           // Fall back to local processing
           const result = processLocalSentiment(text);
+          
+          // Add a simple summary for offline mode
+          result.summary = generateSimpleSummary(text);
+          
           updateResultDisplay(result);
           saveAnalysisToHistory(text, result);
         });
       }
+    }
+    
+    // Generate a simple summary for offline mode
+    function generateSimpleSummary(text) {
+      // Simple extractive summarization - take first few sentences
+      const sentences = text.split(/(?<=[.!?])\s+/);
+      
+      // If text is short, return as is
+      if (sentences.length <= 3 || text.length < 200) {
+        return text;
+      }
+      
+      // Otherwise take first 2-3 sentences based on text length
+      const numSentences = Math.min(3, Math.max(2, Math.floor(sentences.length / 5)));
+      return sentences.slice(0, numSentences).join(' ');
     }
     
     // Simple offline sentiment analysis
@@ -1361,6 +1395,319 @@ document.addEventListener('DOMContentLoaded', function() {
       } catch (error) {
         console.error('Error creating chart:', error);
         container.innerHTML = `<div class="empty-visualization-message">Error creating chart: ${error.message}</div>`;
+      }
+    }
+    
+    // More initialization code
+    initializeTabs();
+    testApiConnection();
+    
+    // Set up analyze button
+    const analyzeButton = getElement('analyze-button');
+    if (analyzeButton) {
+      analyzeButton.addEventListener('click', () => {
+        console.log('Analyze button clicked');
+        performAnalysis();
+      });
+    }
+    
+    // Function to perform sentiment analysis with summarization
+    function performAnalysis() {
+      const textInput = getElement('text-input');
+      if (!textInput || !textInput.value.trim()) {
+        alert('Please enter some text to analyze.');
+        return;
+      }
+      
+      const text = textInput.value.trim();
+      const modelSelector = getElement('model-selector');
+      const modelType = modelSelector ? modelSelector.value : 'simple';
+      
+      console.log(`Analyzing text with model: ${modelType}`);
+      
+      // Clear previous results
+      resetResultDisplay();
+      
+      // Show loading state
+      const sentimentLabel = getElement('sentiment-label');
+      const summaryContainer = getElement('summary-container');
+      const summaryText = getElement('summary-text');
+      
+      if (sentimentLabel) {
+        sentimentLabel.textContent = 'Analyzing...';
+      }
+      
+      if (summaryText) {
+        summaryText.textContent = 'Generating summary...';
+      }
+      
+      if (summaryContainer) {
+        summaryContainer.style.display = 'block';
+      }
+      
+      // Use the combined analyze with summary request
+      safeSendMessage({ 
+        type: 'analyzeWithSummary', 
+        text: text,
+        options: {
+          model: modelType,
+          preferAdvancedModel: true
+        }
+      }, (result) => {
+        console.log('Received analysis result:', result);
+        
+        if (result.error) {
+          console.error('Error in analysis:', result.error);
+          if (sentimentLabel) {
+            sentimentLabel.textContent = 'Error: ' + result.error;
+          }
+          if (summaryText) {
+            summaryText.textContent = 'Could not generate summary due to an error.';
+          }
+          return;
+        }
+        
+        // Update result display with sentiment
+        updateResultDisplay(result);
+        
+        // Display summary if available
+        if (summaryText && result.summary) {
+          summaryText.textContent = result.summary;
+        } else if (summaryText) {
+          summaryText.textContent = 'No summary available for this text.';
+        }
+        
+        // Save to history
+        saveAnalysisToHistory(text, result);
+      });
+    }
+    
+    // Reset result display
+    function resetResultDisplay() {
+      const sentimentLabel = getElement('sentiment-label');
+      const sentimentEmoji = getElement('sentiment-emoji');
+      const confidenceBar = getElement('confidence-bar');
+      const summaryText = getElement('summary-text');
+      
+      if (sentimentLabel) {
+        sentimentLabel.textContent = '';
+        sentimentLabel.className = 'sentiment-label';
+      }
+      
+      if (sentimentEmoji) {
+        sentimentEmoji.textContent = '';
+      }
+      
+      if (confidenceBar) {
+        confidenceBar.style.width = '0%';
+      }
+      
+      if (summaryText) {
+        summaryText.textContent = '';
+      }
+    }
+    
+    // Update result display with sentiment analysis result
+    function updateResultDisplay(result) {
+      const sentimentLabel = getElement('sentiment-label');
+      const sentimentEmoji = getElement('sentiment-emoji');
+      const confidenceBar = getElement('confidence-bar');
+      
+      if (!sentimentLabel || !sentimentEmoji || !confidenceBar) {
+        console.error('Missing elements for displaying results');
+        return;
+      }
+      
+      let sentiment = '';
+      let emoji = '';
+      let labelClass = '';
+      
+      // Determine sentiment class and emoji
+      if (result.category === 0 || result.label === 'negative') {
+        sentiment = 'Negative';
+        emoji = '😞';
+        labelClass = 'negative';
+      } else if (result.category === 2 || result.label === 'positive') {
+        sentiment = 'Positive';
+        emoji = '😊';
+        labelClass = 'positive';
+      } else {
+        sentiment = 'Neutral';
+        emoji = '😐';
+        labelClass = 'neutral';
+      }
+      
+      // Update the display
+      sentimentLabel.textContent = sentiment;
+      sentimentLabel.className = `sentiment-label ${labelClass}`;
+      sentimentEmoji.textContent = emoji;
+      
+      // Update confidence bar
+      const confidence = result.confidence || 0.5;
+      confidenceBar.style.width = `${confidence * 100}%`;
+      confidenceBar.className = `confidence-bar ${labelClass}`;
+      
+      // Show model loading time if applicable
+      if (result.modelWasJustLoaded && result.loadingTimeSeconds) {
+        logToDebug(`Model was just loaded in ${result.loadingTimeSeconds.toFixed(2)} seconds`);
+      }
+      
+      // Show any additional emotion data if available
+      if (result.emotions && Object.keys(result.emotions).length > 0) {
+        const emotionsDisplay = getElement('emotions-display');
+        if (emotionsDisplay) {
+          emotionsDisplay.innerHTML = '';
+          emotionsDisplay.style.display = 'block';
+          
+          for (const [emotion, score] of Object.entries(result.emotions)) {
+            const emotionElement = document.createElement('div');
+            emotionElement.className = 'emotion-item';
+            emotionElement.innerHTML = `
+              <span class="emotion-name">${emotion}:</span>
+              <div class="emotion-bar-container">
+                <div class="emotion-bar" style="width: ${score * 100}%"></div>
+              </div>
+              <span class="emotion-score">${(score * 100).toFixed(0)}%</span>
+            `;
+            emotionsDisplay.appendChild(emotionElement);
+          }
+        }
+      }
+    }
+    
+    // Save sentiment analysis to history
+    function saveAnalysisToHistory(text, result) {
+      // Only save if we have actual text and a result
+      if (!text || !result) return;
+      
+      // Get existing history
+      safeStorageGet({ 'analysisHistory': [] }, (data) => {
+        let history = data.analysisHistory || [];
+        
+        // Add new entry
+        history.unshift({
+          text: text,
+          result: result,
+          timestamp: Date.now()
+        });
+        
+        // Keep only the last 50 entries
+        if (history.length > 50) {
+          history = history.slice(0, 50);
+        }
+        
+        // Save updated history
+        safeStorageSet({ 'analysisHistory': history }, () => {
+          console.log('Updated analysis history');
+        });
+      });
+    }
+    
+    // Initialize history tab
+    function initializeHistoryTab() {
+      const historyContainer = getElement('history-container');
+      if (!historyContainer) return;
+      
+      // Clear existing history
+      historyContainer.innerHTML = '';
+      
+      // Get history from storage
+      safeStorageGet({ 'analysisHistory': [] }, (data) => {
+        const history = data.analysisHistory || [];
+        
+        if (history.length === 0) {
+          historyContainer.innerHTML = '<div class="no-history">No analysis history yet.</div>';
+          return;
+        }
+        
+        // Create elements for each history entry
+        history.forEach((entry, index) => {
+          const historyItem = document.createElement('div');
+          historyItem.className = 'history-item';
+          
+          // Determine sentiment class
+          let sentimentClass = 'neutral';
+          if (entry.result.category === 0 || entry.result.label === 'negative') {
+            sentimentClass = 'negative';
+          } else if (entry.result.category === 2 || entry.result.label === 'positive') {
+            sentimentClass = 'positive';
+          }
+          
+          // Format timestamp
+          const date = new Date(entry.timestamp);
+          const formattedDate = `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+          
+          // Create HTML for history item
+          historyItem.innerHTML = `
+            <div class="history-header">
+              <span class="history-date">${formattedDate}</span>
+              <span class="history-sentiment ${sentimentClass}">${entry.result.label}</span>
+            </div>
+            <div class="history-text">${entry.text.substring(0, 100)}${entry.text.length > 100 ? '...' : ''}</div>
+            ${entry.result.summary ? `<div class="history-summary">Summary: ${entry.result.summary}</div>` : ''}
+            <div class="history-actions">
+              <button class="history-analyze-again" data-index="${index}">Analyze Again</button>
+              <button class="history-remove" data-index="${index}">Remove</button>
+            </div>
+          `;
+          
+          historyContainer.appendChild(historyItem);
+        });
+        
+        // Add event listeners for history actions
+        const analyzeAgainButtons = document.querySelectorAll('.history-analyze-again');
+        const removeButtons = document.querySelectorAll('.history-remove');
+        
+        analyzeAgainButtons.forEach(button => {
+          button.addEventListener('click', () => {
+            const index = parseInt(button.getAttribute('data-index'));
+            const entry = history[index];
+            
+            // Switch to analyze tab
+            const analyzeBtn = document.querySelector('.tab-btn[data-tab="analyze"]');
+            if (analyzeBtn) {
+              analyzeBtn.click();
+            }
+            
+            // Fill text input with historical text
+            const textInput = getElement('text-input');
+            if (textInput && entry.text) {
+              textInput.value = entry.text;
+              
+              // Trigger analysis
+              const analyzeButton = getElement('analyze-button');
+              if (analyzeButton) {
+                analyzeButton.click();
+              }
+            }
+          });
+        });
+        
+        removeButtons.forEach(button => {
+          button.addEventListener('click', () => {
+            const index = parseInt(button.getAttribute('data-index'));
+            
+            // Remove entry from history
+            history.splice(index, 1);
+            
+            // Save updated history
+            safeStorageSet({ 'analysisHistory': history }, () => {
+              // Refresh history display
+              initializeHistoryTab();
+            });
+          });
+        });
+      });
+    }
+    
+    // Initialize visualization tab
+    function initializeVisualizationTab() {
+      console.log('Visualization tab initialized');
+      
+      // This will be implemented in a future update
+      const visualizationContainer = getElement('visualization-container');
+      if (visualizationContainer) {
+        visualizationContainer.innerHTML = '<div class="coming-soon">Mood visualization coming soon!</div>';
       }
     }
     

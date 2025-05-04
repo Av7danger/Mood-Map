@@ -151,6 +151,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
     }
     
+    // New handler for analyzing sentiment and generating summary together
+    else if (request.type === 'analyzeWithSummary') {
+      // Process combined sentiment and summary request
+      analyzeWithSummary(request.text, request.options)
+        .then(result => {
+          console.log("Analysis with summary result:", result);
+          if (extensionContextValid) {
+            sendResponse(result);
+          }
+        })
+        .catch(error => {
+          console.error("Error in sentiment analysis with summary:", error);
+          if (extensionContextValid) {
+            sendResponse({ 
+              error: error.message,
+              sentiment: 0,
+              category: 1,
+              label: "neutral",
+              confidence: 0.5
+            });
+          }
+        });
+      
+      // Return true to indicate we'll send a response asynchronously
+      return true;
+    }
+    
     else if (request.type === 'updateDefaultModel') {
       // Update the default model setting
       safeStorageSet({ selectedModel: request.model }, () => {
@@ -284,35 +311,40 @@ async function analyzeSentiment(text, options = {}) {
     // Get settings from storage
     const { apiUrl, selectedModel, apiStatus } = await getStoredSettings();
     
+    // If summarization is requested, use the specialized method
+    if (options.summarize) {
+      return analyzeWithSummary(text, options);
+    }
+    
     // Get model to use - either from options or from stored settings
     const modelToUse = options.model || selectedModel;
     
     // Optimize for short text analysis - always use simple model for very short text
-    if (text.length < 30 && !text.includes('?') && !options.summarize) {
+    if (text.length < 30 && !text.includes('?')) {
       console.log('Using offline processing with simple model (short text optimization)');
       return processSimpleAnalysis(text);
     }
     
-    // Only use simple model if explicitly selected and not summarizing
-    if (modelToUse === 'simple' && !options.summarize) {
+    // Only use simple model if explicitly selected
+    if (modelToUse === 'simple') {
       console.log('Using offline processing with simple model (user selected)');
       return processSimpleAnalysis(text);
     }
     
-    // If API is known to be offline and summarization is not requested, fall back to simple model
-    if (apiStatus === 'offline' && !options.summarize) {
+    // If API is known to be offline, fall back to simple model
+    if (apiStatus === 'offline') {
       console.log('API is offline, falling back to simple model');
       return processSimpleAnalysis(text);
     }
     
-    console.log(`Using API with model: ${modelToUse}${options.summarize ? ' with summarization' : ''}`);
+    console.log(`Using API with model: ${modelToUse}`);
     
     // Get API endpoint
     const cleanApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
     let endpoint = `${cleanApiUrl}/analyze`;
     
-    // For simple model without summarization, use the specialized fast endpoint if available
-    if (modelToUse === 'simple' && !options.summarize) {
+    // For simple model, use the specialized fast endpoint if available
+    if (modelToUse === 'simple') {
       // Try to use the simple endpoint, but fall back to the main endpoint if it fails
       try {
         const testResponse = await fetch(`${cleanApiUrl}/extension/analyze_simple`, {
@@ -326,12 +358,6 @@ async function analyzeSentiment(text, options = {}) {
       }
     }
     
-    // For summarization requests, always use the /analyze endpoint with advanced model
-    if (options.summarize) {
-      endpoint = `${cleanApiUrl}/analyze`;
-      console.log('Using main analyze endpoint for summarization request');
-    }
-    
     // Make API request - the server will lazy-load the required model
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -341,10 +367,10 @@ async function analyzeSentiment(text, options = {}) {
       },
       body: JSON.stringify({
         text: text,
-        model_type: options.summarize ? 'advanced' : modelToUse,
+        model_type: modelToUse,
         features: {
           sentiment: true,
-          summarization: options.summarize || false
+          summarization: false
         }
       })
     });
@@ -378,20 +404,86 @@ async function analyzeSentiment(text, options = {}) {
       safeStorageSet({ apiStatus: 'offline' });
     }
     
-    // Only fall back to simple analysis when not summarizing
-    if (!options.summarize) {
-      console.log("Falling back to offline processing due to error");
-      return processSimpleAnalysis(text);
+    console.log("Falling back to offline processing due to error");
+    return processSimpleAnalysis(text);
+  }
+}
+
+// New function to analyze sentiment and generate summary in one request
+async function analyzeWithSummary(text, options = {}) {
+  console.log("Analyzing sentiment and generating summary for text:", text.substring(0, 50) + "...");
+  
+  try {
+    // Get settings from storage
+    const { apiUrl, selectedModel, apiStatus } = await getStoredSettings();
+    
+    // For summarization, we should use advanced model if available
+    const modelToUse = options.model || selectedModel;
+    const preferAdvancedModel = options.preferAdvancedModel !== false;
+    
+    // If API is known to be offline, fall back to simple sentiment analysis only
+    if (apiStatus === 'offline') {
+      console.log('API is offline, falling back to simple sentiment model without summary');
+      const sentimentResult = processSimpleAnalysis(text);
+      
+      // Add a simple placeholder for summary
+      sentimentResult.summary = "Summary unavailable (API is offline)";
+      sentimentResult.summarization_method = "none";
+      
+      return sentimentResult;
     }
     
-    // Return error response for summarization requests
-    return {
-      error: "Could not connect to backend for advanced analysis and summarization",
-      sentiment: 0,
-      category: 1,
-      label: "neutral",
-      confidence: 0.5
-    };
+    console.log(`Using API with model: ${preferAdvancedModel ? 'advanced' : modelToUse} for analysis with summary`);
+    
+    // Get API endpoint - specifically use the combined endpoint
+    const cleanApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
+    let endpoint = `${cleanApiUrl}/extension/analyze-with-summary`;
+    
+    // Make API request for the combined analysis
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        text: text,
+        model_type: preferAdvancedModel ? 'advanced' : modelToUse
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`API returned ${response.status}: ${response.statusText}`);
+    }
+    
+    const result = await response.json();
+    console.log("API returned combined result:", result);
+    
+    // Update API status to online since we got a successful response
+    safeStorageSet({ apiStatus: 'online' });
+    
+    return result;
+    
+  } catch (error) {
+    console.error("Error analyzing sentiment with summary:", error);
+    
+    // Mark API as offline if we couldn't connect
+    if (error.message.includes('Failed to fetch') || 
+        error.message.includes('NetworkError') ||
+        error.message.includes('ECONNREFUSED')) {
+      console.log('API connection failed, marking as offline');
+      safeStorageSet({ apiStatus: 'offline' });
+    }
+    
+    // Fall back to simple sentiment analysis
+    console.log("Falling back to offline processing due to error");
+    const sentimentResult = processSimpleAnalysis(text);
+    
+    // Add placeholder for summary
+    sentimentResult.summary = "Summary unavailable (API error)";
+    sentimentResult.summarization_method = "none";
+    
+    return sentimentResult;
   }
 }
 
