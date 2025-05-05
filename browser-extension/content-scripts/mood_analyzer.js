@@ -64,10 +64,10 @@ function findMainPostContent() {
                 
                 console.log('Found tweet content:', text.substring(0, 50) + '...');
                 
-                // Add a processing indicator within the tweet
+                // Add a processing indicator within the tweet for both sentiment and summarization
                 const processingIndicator = document.createElement('div');
                 processingIndicator.className = 'mood-map-processing';
-                processingIndicator.textContent = 'Analyzing sentiment...';
+                processingIndicator.textContent = 'Analyzing tweet...';
                 processingIndicator.style.position = 'absolute';
                 processingIndicator.style.top = '5px';
                 processingIndicator.style.right = '5px';
@@ -103,20 +103,39 @@ function findMainPostContent() {
                     fallbackBadge.style.zIndex = '10000';
                     postElement.appendChild(fallbackBadge);
                     
-                    console.log('Sentiment analysis timed out, showing fallback badge');
+                    console.log('Analysis timed out, showing fallback badge');
                 }, 10000); // 10 second timeout
                 
-                // Send message to background script for analysis
-                chrome.runtime.sendMessage({ type: 'analyzeSentiment', text: text }, response => {
-                    console.log('Received response from background script:', response);
+                // Use analyzeWithSummary instead of separate calls for sentiment and summary
+                // Always use BART model for tweets and always generate summary
+                chrome.runtime.sendMessage({ 
+                    type: 'analyzeWithSummary', 
+                    text: text,
+                    options: {
+                        preferAdvancedModel: true, // Always use advanced model (BART) for tweets
+                        forceGenerateSummary: true // Always generate summary regardless of length
+                    }
+                }, response => {
+                    console.log('Received combined analysis response:', response);
                     clearTimeout(processingTimeout);
                     processingIndicator.remove();
                     
-                    if (response && response.sentiment && !response.error) {
-                        displaySentiment(postElement, response.sentiment, response.prediction, response.sentiment_percentage);
-                        console.log('Analysis successful:', response.sentiment);
+                    if (response && !response.error) {
+                        // Display sentiment results
+                        if (response.sentiment !== undefined) {
+                            displaySentiment(postElement, response.label || response.sentiment, 
+                                            response.category || 1, 
+                                            response.confidence ? Math.round(response.confidence * 100) : undefined);
+                        }
+                        
+                        // Always display summary for tweets (if available)
+                        if (response.summary) {
+                            displaySummary(postElement, response.summary);
+                        }
+                        
+                        console.log('Analysis successful');
                     } else {
-                        console.error('Failed to receive sentiment analysis response:', response);
+                        console.error('Failed to receive analysis response:', response);
                         
                         // Add detailed error information for debugging
                         let errorMsg = 'Analysis failed';
@@ -334,57 +353,181 @@ function displaySentiment(postElement, sentiment, sentimentCategory, sentimentPe
 
 // Function to display summary for longer posts
 function displaySummary(postElement, summary) {
-    // Remove any existing summary
-    const existingSummary = postElement.querySelector('.mood-map-summary');
-    if (existingSummary) existingSummary.remove();
+  // Check if we already added a summary to this tweet
+  if (postElement.querySelector('.mood-map-summary-container')) {
+    return;
+  }
+  
+  // Create summary container
+  const summaryContainer = document.createElement('div');
+  summaryContainer.className = 'mood-map-summary-container';
+  summaryContainer.style.margin = '10px 0';
+  summaryContainer.style.padding = '10px 15px';
+  summaryContainer.style.borderRadius = '12px';
+  summaryContainer.style.backgroundColor = 'rgba(29, 161, 242, 0.1)';
+  summaryContainer.style.borderLeft = '4px solid #1da1f2';
+  summaryContainer.style.fontSize = '14px';
+  summaryContainer.style.lineHeight = '1.4';
+  summaryContainer.style.color = 'inherit';
+  
+  // Create header with icon
+  const summaryHeader = document.createElement('div');
+  summaryHeader.style.display = 'flex';
+  summaryHeader.style.alignItems = 'center';
+  summaryHeader.style.marginBottom = '6px';
+  summaryHeader.style.fontWeight = 'bold';
+  
+  // Add icon (using emoji as placeholder, can be replaced with SVG)
+  const iconSpan = document.createElement('span');
+  iconSpan.textContent = '✨';
+  iconSpan.style.marginRight = '6px';
+  
+  // Add "AI Summary" text
+  const headerText = document.createElement('span');
+  headerText.textContent = 'AI Summary';
+  
+  // Assemble header
+  summaryHeader.appendChild(iconSpan);
+  summaryHeader.appendChild(headerText);
+  
+  // Create summary text element
+  const summaryText = document.createElement('div');
+  summaryText.textContent = summary;
+  
+  // Assemble summary container
+  summaryContainer.appendChild(summaryHeader);
+  summaryContainer.appendChild(summaryText);
+  
+  // Find a good place to insert the summary in the tweet
+  const tweetContent = postElement.querySelector('[data-testid="tweetText"]')?.parentElement;
+  if (tweetContent) {
+    // Try to find the bottom of tweet content to insert after
+    const possibleInsertPoints = [
+      postElement.querySelector('[data-testid="reply"]')?.parentElement?.parentElement,
+      postElement.querySelector('[data-testid="like"]')?.parentElement?.parentElement?.parentElement
+    ];
     
-    const summaryElement = document.createElement('div');
-    summaryElement.className = 'mood-map-summary';
+    // Find the first valid insertion point
+    const insertionPoint = possibleInsertPoints.find(el => el && el.parentElement);
     
-    // Create a header
-    const summaryHeader = document.createElement('div');
-    summaryHeader.className = 'mood-map-summary-header';
-    summaryHeader.innerText = 'Summary ▶';
-    summaryHeader.style.fontWeight = 'bold';
-    summaryHeader.style.marginBottom = '4px';
-    summaryHeader.style.borderBottom = '1px solid #e0e0e0';
-    summaryHeader.style.paddingBottom = '2px';
+    if (insertionPoint) {
+      insertionPoint.parentElement.insertBefore(summaryContainer, insertionPoint);
+    } else {
+      // Fallback: append to the tweet content
+      tweetContent.appendChild(summaryContainer);
+    }
+  } else {
+    // Last resort: append to the end of the tweet
+    postElement.appendChild(summaryContainer);
+  }
+}
+
+/**
+ * Displays the generated summary below a tweet
+ * @param {HTMLElement} tweetElement - The parent tweet element
+ * @param {string} summary - The generated summary text
+ */
+function displaySummary(tweetElement, summary) {
+  // Check if we already added a summary to this tweet
+  if (tweetElement.querySelector('.mood-map-summary-container')) {
+    return;
+  }
+  
+  // Create summary container
+  const summaryContainer = document.createElement('div');
+  summaryContainer.className = 'mood-map-summary-container';
+  summaryContainer.style.margin = '10px 0';
+  summaryContainer.style.padding = '10px 15px';
+  summaryContainer.style.borderRadius = '12px';
+  summaryContainer.style.backgroundColor = 'rgba(29, 161, 242, 0.1)';
+  summaryContainer.style.borderLeft = '4px solid #1da1f2';
+  summaryContainer.style.fontSize = '14px';
+  summaryContainer.style.lineHeight = '1.4';
+  summaryContainer.style.color = 'inherit';
+  
+  // Create header with icon
+  const summaryHeader = document.createElement('div');
+  summaryHeader.style.display = 'flex';
+  summaryHeader.style.alignItems = 'center';
+  summaryHeader.style.marginBottom = '6px';
+  summaryHeader.style.fontWeight = 'bold';
+  
+  // Add icon (using emoji as placeholder, can be replaced with SVG)
+  const iconSpan = document.createElement('span');
+  iconSpan.textContent = '✨';
+  iconSpan.style.marginRight = '6px';
+  
+  // Add "AI Summary" text
+  const headerText = document.createElement('span');
+  
+  // Check if we have model information in the response
+  if (response && response.summarization_method) {
+    if (response.summarization_method === 'bart') {
+      headerText.textContent = 'BART Summary';
+    } else {
+      headerText.textContent = 'AI Summary';
+    }
+  } else {
+    headerText.textContent = 'AI Summary';
+  }
+  
+  // Assemble header
+  summaryHeader.appendChild(iconSpan);
+  summaryHeader.appendChild(headerText);
+  
+  // Create summary text element
+  const summaryText = document.createElement('div');
+  summaryText.textContent = summary;
+  
+  // If we have model information, add a small attribution line
+  if (response && response.model_used) {
+    const modelAttribution = document.createElement('div');
+    modelAttribution.style.fontSize = '11px';
+    modelAttribution.style.marginTop = '8px';
+    modelAttribution.style.color = 'var(--text-tertiary, rgb(83, 100, 113))';
+    modelAttribution.style.fontStyle = 'italic';
     
-    // Create the summary content
-    const summaryContent = document.createElement('div');
-    summaryContent.className = 'mood-map-summary-content';
-    summaryContent.innerText = summary;
+    // Display appropriate model info
+    if (response.model_used.includes('+')) {
+      // For combined models (like "simple + BART")
+      modelAttribution.textContent = `Generated using: ${response.model_used}`;
+    } else if (response.summarization_method === 'bart') {
+      // For BART summarization with unspecified sentiment model
+      modelAttribution.textContent = `Generated using: ${response.model_used || 'BART summarizer'}`;
+    } else {
+      // Default attribution
+      modelAttribution.textContent = `Generated using: ${response.model_used || 'AI model'}`;
+    }
     
-    // Style the summary container
-    summaryElement.style.backgroundColor = '#f5f5f5';
-    summaryElement.style.border = '1px solid #e0e0e0';
-    summaryElement.style.borderRadius = '4px';
-    summaryElement.style.padding = '8px';
-    summaryElement.style.margin = '10px 0';
-    summaryElement.style.fontSize = '14px';
-    summaryElement.style.color = '#333';
-    summaryElement.style.boxShadow = 'inset 0 1px 3px rgba(0,0,0,0.1)';
+    summaryText.appendChild(modelAttribution);
+  }
+  
+  // Assemble summary container
+  summaryContainer.appendChild(summaryHeader);
+  summaryContainer.appendChild(summaryText);
+  
+  // Find a good place to insert the summary in the tweet
+  const tweetContent = tweetElement.querySelector('[data-testid="tweetText"]')?.parentElement;
+  if (tweetContent) {
+    // Try to find the bottom of tweet content to insert after
+    const possibleInsertPoints = [
+      tweetElement.querySelector('[data-testid="reply"]')?.parentElement?.parentElement,
+      tweetElement.querySelector('[data-testid="like"]')?.parentElement?.parentElement?.parentElement
+    ];
     
-    // Add toggle functionality
-    summaryElement.style.cursor = 'pointer';
-    summaryContent.style.display = 'none'; // Initially hidden
+    // Find the first valid insertion point
+    const insertionPoint = possibleInsertPoints.find(el => el && el.parentElement);
     
-    summaryHeader.onclick = function() {
-        if (summaryContent.style.display === 'none') {
-            summaryContent.style.display = 'block';
-            summaryHeader.innerText = 'Summary ▼';
-        } else {
-            summaryContent.style.display = 'none';
-            summaryHeader.innerText = 'Summary ▶';
-        }
-    };
-    
-    // Append elements
-    summaryElement.appendChild(summaryHeader);
-    summaryElement.appendChild(summaryContent);
-    
-    // Find a good insertion point - right after the post content
-    postElement.appendChild(summaryElement);
+    if (insertionPoint) {
+      insertionPoint.parentElement.insertBefore(summaryContainer, insertionPoint);
+    } else {
+      // Fallback: append to the tweet content
+      tweetContent.appendChild(summaryContainer);
+    }
+  } else {
+    // Last resort: append to the end of the tweet
+    tweetElement.appendChild(summaryContainer);
+  }
 }
 
 // Function to check for URL changes (to detect navigation to individual posts)
@@ -821,7 +964,7 @@ function analyzeTweetText(text, loadingBadgeContainer, attempt = 1) {
     // Handle errors or missing response
     if (!response || chrome.runtime.lastError) {
       console.error('Mood Map analysis failed:', chrome.runtime.lastError);
-      
+       
       // Retry logic
       if (attempt < MAX_RETRY_ATTEMPTS) {
         console.log(`Retry attempt ${attempt + 1} for text: ${text.substring(0, 20)}...`);
@@ -896,10 +1039,30 @@ function analyzeTweetText(text, loadingBadgeContainer, attempt = 1) {
     if (loadingBadgeContainer && loadingBadgeContainer.parentNode) {
       loadingBadgeContainer.parentNode.replaceChild(sentimentBadge, loadingBadgeContainer);
     }
+    
+    // Always display the summary if available, regardless of tweet length
+    if (response.summary) {
+      // Find the parent tweet element
+      const tweetElement = loadingBadgeContainer.closest('article') || 
+                        loadingBadgeContainer.closest('[data-testid="tweet"]') || 
+                        loadingBadgeContainer.parentElement.closest('article');
+      
+      if (tweetElement) {
+        displaySummary(tweetElement, response.summary);
+      }
+    }
   };
   
-  // Use our request queue system instead of direct API calls
-  queueSentimentRequest(trimmedText, handleResponse);
+  // Use the analyzeWithSummary endpoint instead of just sentiment analysis
+  // This ensures we always get both sentiment and summary in a single request
+  chrome.runtime.sendMessage({ 
+    type: 'analyzeWithSummary', 
+    text: trimmedText,
+    options: {
+      preferAdvancedModel: true, // Always use advanced model (BART) for tweets
+      forceGenerateSummary: true // Always generate summary regardless of length
+    }
+  }, handleResponse);
 }
 
 // Request rate limiting configuration
@@ -1288,4 +1451,103 @@ function showDetailedOverlay(element, sentimentData, displayData) {
       document.removeEventListener('click', closeOverlay);
     }
   });
+}
+
+// Function to display tweet summary
+function displaySummary(tweetElement, summary) {
+  // Check if a summary already exists for this tweet
+  if (tweetElement.querySelector('.mood-map-summary-container')) {
+    return; // Already has a summary, don't add another
+  }
+  
+  // Create the summary container
+  const summaryContainer = document.createElement('div');
+  summaryContainer.className = 'mood-map-summary-container';
+  summaryContainer.style.margin = '8px 0';
+  summaryContainer.style.padding = '10px 12px';
+  summaryContainer.style.borderRadius = '12px';
+  summaryContainer.style.backgroundColor = 'var(--background-secondary, rgba(247, 249, 249, 0.1))';
+  summaryContainer.style.fontSize = '14px';
+  summaryContainer.style.lineHeight = '1.4';
+  summaryContainer.style.color = 'var(--text-secondary, rgb(83, 100, 113))';
+  summaryContainer.style.borderLeft = '3px solid var(--accent-blue, rgb(29, 155, 240))';
+
+  // Create a heading for the summary
+  const summaryHeading = document.createElement('div');
+  summaryHeading.style.fontWeight = 'bold';
+  summaryHeading.style.marginBottom = '4px';
+  summaryHeading.style.display = 'flex';
+  summaryHeading.style.alignItems = 'center';
+  summaryHeading.style.color = 'var(--text-primary, rgb(15, 20, 25))';
+  
+  // Add an icon to the heading
+  const summaryIcon = document.createElement('span');
+  summaryIcon.innerHTML = '📝'; // Summary icon
+  summaryIcon.style.marginRight = '6px';
+  
+  // Get the heading text - show summarization method if available
+  const headingText = document.createElement('span');
+  
+  // Check if we have model information in the response
+  if (response && response.summarization_method) {
+    if (response.summarization_method === 'bart') {
+      headingText.textContent = 'BART Summary';
+    } else {
+      headingText.textContent = 'AI Summary';
+    }
+  } else {
+    headingText.textContent = 'AI Summary';
+  }
+  
+  // Assemble the heading
+  summaryHeading.appendChild(summaryIcon);
+  summaryHeading.appendChild(headingText);
+  
+  // Create the summary text element
+  const summaryText = document.createElement('div');
+  summaryText.textContent = summary;
+  
+  // If we have model information, add a small attribution line
+  if (response && response.model_used) {
+    const modelAttribution = document.createElement('div');
+    modelAttribution.style.fontSize = '11px';
+    modelAttribution.style.marginTop = '8px';
+    modelAttribution.style.color = 'var(--text-tertiary, rgb(83, 100, 113))';
+    modelAttribution.style.fontStyle = 'italic';
+    
+    // Display appropriate model info
+    if (response.model_used.includes('+')) {
+      // For combined models (like "simple + BART")
+      modelAttribution.textContent = `Generated using: ${response.model_used}`;
+    } else if (response.summarization_method === 'bart') {
+      // For BART summarization with unspecified sentiment model
+      modelAttribution.textContent = `Generated using: ${response.model_used || 'BART summarizer'}`;
+    } else {
+      // Default attribution
+      modelAttribution.textContent = `Generated using: ${response.model_used || 'AI model'}`;
+    }
+    
+    summaryText.appendChild(modelAttribution);
+  }
+  
+  // Assemble the summary container
+  summaryContainer.appendChild(summaryHeading);
+  summaryContainer.appendChild(summaryText);
+  
+  // Find the right place to insert the summary in the tweet
+  const actionBar = tweetElement.querySelector('[role="group"]');
+  if (actionBar) {
+    // Insert after the action bar
+    if (actionBar.nextSibling) {
+      actionBar.parentNode.insertBefore(summaryContainer, actionBar.nextSibling);
+    } else {
+      actionBar.parentNode.appendChild(summaryContainer);
+    }
+  } else {
+    // If action bar not found, append to the tweet
+    tweetElement.appendChild(summaryContainer);
+  }
+  
+  // Log that we've added a summary
+  console.log('Added summary to tweet:', summary);
 }

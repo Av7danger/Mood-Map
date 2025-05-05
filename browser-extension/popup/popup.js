@@ -1,1206 +1,612 @@
-// MoodMap extension popup.js - Completely fixed version
+// MoodMap extension popup.js - Complete Implementation
 
-// Add extension context invalidation error handling
-let extensionContextValid = true;
-
-// Wrapper function to safely make chrome API calls
-function safeChromeApiCall(apiCall, fallback = null) {
-  return function(...args) {
-    try {
-      if (!extensionContextValid) {
-        console.warn("Extension context already invalidated, aborting API call");
-        return typeof fallback === 'function' ? fallback(...args) : fallback;
-      }
-      
-      return apiCall(...args);
-    } catch (error) {
-      console.error("Chrome API call failed:", error);
-      
-      if (error.message.includes("Extension context invalidated")) {
-        handleExtensionContextInvalidated();
-      }
-      
-      return typeof fallback === 'function' ? fallback(...args) : fallback;
-    }
-  };
-}
-
-// Handle extension context invalidation 
-function handleExtensionContextInvalidated() {
-  if (extensionContextValid) {
-    extensionContextValid = false;
-    console.warn("Extension context has been invalidated");
-    
-    // Show user-friendly error message
-    const content = document.getElementById('content');
-    const loading = document.getElementById('loading');
-    
-    if (content) {
-      content.innerHTML = `
-      <div class="error-container">
-        <h2>Extension Error</h2>
-        <p>The extension context has been invalidated. This usually happens when the extension is updated, reloaded, or the browser is restarted during an operation.</p>
-        <p>Please close this popup and try again. If the problem persists, try reloading the extension:</p>
-        <ol>
-          <li>Go to your browser's extension management page</li>
-          <li>Find Mood Map and click "Reload" or toggle it off and on</li>
-          <li>Try using the extension again</li>
-        </ol>
-        <button id="close-popup-btn" class="primary-button">Close Popup</button>
-      </div>`;
-      
-      // Add event listener for the close button
-      setTimeout(() => {
-        const closeBtn = document.getElementById('close-popup-btn');
-        if (closeBtn) {
-          closeBtn.addEventListener('click', () => window.close());
-        }
-      }, 0);
-    }
-    
-    if (loading) {
-      loading.style.display = 'none';
-    }
-  }
-}
-
-// Safely send message to background script with retry and error handling
-function safeSendMessage(message, callback) {
-  if (!extensionContextValid) {
-    console.warn("Extension context invalidated, not sending message:", message);
-    if (typeof callback === 'function') {
-      callback({ error: "Extension context invalidated" });
-    }
-    return;
-  }
-  
-  try {
-    chrome.runtime.sendMessage(message, (response) => {
-      // Check for runtime errors
-      const lastError = chrome.runtime.lastError;
-      if (lastError) {
-        console.error("Runtime error:", lastError.message);
-        
-        // Handle extension context invalidation
-        if (lastError.message.includes("Extension context invalidated")) {
-          handleExtensionContextInvalidated();
-        }
-        
-        // Call callback with error
-        if (typeof callback === 'function') {
-          callback({ error: lastError.message });
-        }
-        return;
-      }
-      
-      // Call callback with response
-      if (typeof callback === 'function') {
-        callback(response);
-      }
-    });
-  } catch (error) {
-    console.error("Error sending message:", error);
-    
-    // Handle extension context invalidation
-    if (error.message.includes("Extension context invalidated")) {
-      handleExtensionContextInvalidated();
-    }
-    
-    // Call callback with error
-    if (typeof callback === 'function') {
-      callback({ error: error.message });
-    }
-  }
-}
-
-// Global error handler
-window.addEventListener('error', function(event) {
-  console.error("Global error:", event.error);
-  
-  // Check if this is an extension context invalidation error
-  if (event.error && event.error.message && event.error.message.includes("Extension context invalidated")) {
-    handleExtensionContextInvalidated();
-  }
-  
-  // Don't prevent default error handling
-  return false;
-});
-
-// Safe storage access functions
-const safeStorageGet = (keys, callback) => {
-  try {
-    chrome.storage.local.get(keys, (result) => {
-      if (chrome.runtime.lastError) {
-        console.error("Storage get error:", chrome.runtime.lastError);
-        // Check for context invalidation
-        if (chrome.runtime.lastError.message.includes("Extension context invalidated")) {
-          handleExtensionContextInvalidated();
-        }
-        callback({});
-      } else {
-        callback(result);
-      }
-    });
-  } catch (error) {
-    console.error("Error in storage get:", error);
-    if (error.message.includes("Extension context invalidated")) {
-      handleExtensionContextInvalidated();
-    }
-    callback({});
-  }
-};
-
-const safeStorageSet = (items, callback) => {
-  try {
-    chrome.storage.local.set(items, () => {
-      if (chrome.runtime.lastError) {
-        console.error("Storage set error:", chrome.runtime.lastError);
-        // Check for context invalidation
-        if (chrome.runtime.lastError.message.includes("Extension context invalidated")) {
-          handleExtensionContextInvalidated();
-        }
-      }
-      if (callback) callback();
-    });
-  } catch (error) {
-    console.error("Error in storage set:", error);
-    if (error.message.includes("Extension context invalidated")) {
-      handleExtensionContextInvalidated();
-    }
-    if (callback) callback();
-  }
-};
-
-// MoodMap extension popup.js - With extension context invalidation handling
 document.addEventListener('DOMContentLoaded', function() {
-  console.log('==== MOOD MAP DEBUG LOG ====');
-  console.log('DOM content loaded, initializing Mood Map extension...');
+  console.log('MoodMap extension initialized');
   
-  // Try to ping the background script to verify extension context is valid
-  safeSendMessage({ type: 'ping' }, (response) => {
-    if (response && response.error) {
-      console.error("Background script communication error:", response.error);
-      if (response.error.includes("Extension context invalidated")) {
-        handleExtensionContextInvalidated();
-        return;
-      }
-    } else if (response && response.type === 'pong') {
-      console.log("Background script communication verified:", response);
-      // Continue with extension initialization
-      initializeExtension();
-    } else {
-      console.warn("Unexpected ping response:", response);
-      // Try to continue anyway
-      initializeExtension();
+  // Initialize the UI components
+  initializeTabs();
+  initializeDebugConsole();
+  initializeTheme();
+  testApiConnection();
+  
+  // Set up event listeners
+  setupEventListeners();
+  
+  // Auto-analyze current page content when popup opens
+  fetchAndAnalyzeActiveTabContent();
+  
+  // Utility function to get elements by ID
+  function getElement(id) {
+    return document.getElementById(id);
+  }
+  
+  // Function to log to debug console
+  function logDebug(message) {
+    console.log(message);
+    const debugOutput = getElement('debug-output');
+    if (debugOutput) {
+      const timestamp = new Date().toLocaleTimeString();
+      debugOutput.value += `[${timestamp}] ${message}\n`;
+      // Auto-scroll to bottom
+      debugOutput.scrollTop = debugOutput.scrollHeight;
     }
-  });
+  }
   
-  // Main extension initialization function
-  function initializeExtension() {
-    // Force content to display and hide loading screen immediately
-    const content = document.getElementById('content');
-    const loading = document.getElementById('loading');
-  
-    if (content && loading) {
-      console.log('Showing content and hiding loading screen');
-      content.style.display = 'block';
-      loading.style.display = 'none';
-    }
-  
-    // Add direct debug information to the UI
-    const summaryText = document.getElementById('summary-text');
-    if (summaryText) {
-      summaryText.textContent = 'Extension loaded. Checking API connection...';
-    }
-  
-    // Global variables
-    const API_BASE_URL = 'http://localhost:5000';
-    let currentTab = 'analyze';
-  
-    // Helper functions
-    function getElement(id) {
-      return document.getElementById(id);
-    }
-  
-    function getApiUrl(endpoint) {
-      // Get from storage or use default
-      const apiUrlDisplay = getElement('api-url-display');
-      const apiUrl = apiUrlDisplay ? apiUrlDisplay.textContent.trim() : API_BASE_URL;
+  // Function to fetch and analyze content from active tab
+  function fetchAndAnalyzeActiveTabContent() {
+    logDebug('Fetching content from active tab');
     
-      // Remove trailing slash from base URL if present
-      const cleanBaseUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
-      // Add leading slash to endpoint if not present
-      const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-    
-      return `${cleanBaseUrl}${cleanEndpoint}`;
-    }
-  
-    function logToDebug(message) {
-      console.log(message);
-      const debugOutput = getElement('debug-output');
-      if (debugOutput) {
-        const timestamp = new Date().toLocaleTimeString();
-        debugOutput.innerHTML += `<div class="debug-entry"><span class="timestamp">[${timestamp}]</span> ${message}</div>`;
-        debugOutput.scrollTop = debugOutput.scrollHeight;
-      }
-    }
-    
-    // Initialize UI tabs
-    function initializeTabs() {
-      const tabButtons = document.querySelectorAll('.tab-btn');
-      const tabContents = document.querySelectorAll('.tab-content');
-      
-      tabButtons.forEach(button => {
-        button.addEventListener('click', () => {
-          const tabId = button.getAttribute('data-tab');
-          
-          // Hide all tabs
-          tabContents.forEach(tab => {
-            tab.classList.remove('active');
-          });
-          
-          // Deactivate all buttons
-          tabButtons.forEach(btn => {
-            btn.classList.remove('active');
-          });
-          
-          // Activate the selected tab and button
-          const selectedTab = document.getElementById(`${tabId}-tab`);
-          if (selectedTab) {
-            selectedTab.classList.add('active');
-          }
-          
-          button.classList.add('active');
-          
-          // Update current tab
-          currentTab = tabId;
-          console.log(`Switched to tab: ${tabId}`);
-          
-          // Initialize the appropriate tab
-          if (tabId === 'history') {
-            initializeHistoryTab();
-          } else if (tabId === 'visualize') {
-            initializeVisualizationTab();
-          }
-        });
-      });
-      
-      // Start with analyze tab active
-      const analyzeTab = document.getElementById('analyze-tab');
-      const analyzeBtn = document.querySelector('.tab-btn[data-tab="analyze"]');
-      
-      if (analyzeTab && analyzeBtn) {
-        analyzeTab.classList.add('active');
-        analyzeBtn.classList.add('active');
-      }
-    }
-    
-    // Test API connection
-    function testApiConnection() {
-      const apiStatus = getElement('api-status');
-      const apiMessage = getElement('api-message');
-      
-      if (apiStatus) {
-        apiStatus.className = 'api-status unknown';
-        apiStatus.textContent = 'Testing...';
-      }
-      
-      if (apiMessage) {
-        apiMessage.className = 'api-message';
-        apiMessage.textContent = '';
-      }
-      
-      console.log('Testing API connection...');
-      
-      // Make a request to the health endpoint
-      fetch(getApiUrl('health'), {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json'
-        }
-      })
-      .then(response => {
-        console.log(`API responded with status: ${response.status}`);
-        
-        if (!response.ok) {
-          throw new Error(`API returned status ${response.status}`);
-        }
-        
-        return response.json();
-      })
-      .then(data => {
-        console.log('API health check successful:', data);
-        
-        if (apiStatus) {
-          apiStatus.className = 'api-status online';
-          apiStatus.textContent = 'Online';
-        }
-        
-        if (apiMessage) {
-          apiMessage.className = 'api-message success';
-          apiMessage.textContent = 'Connection successful! API is responding correctly.';
-        }
-        
-        if (summaryText) {
-          summaryText.textContent = 'API connection successful. Ready to analyze text.';
-        }
-        
-        // Save API status to storage
-        safeStorageSet({ 
-          apiStatus: 'online',
-          lastHealthCheckTime: Date.now()
-        });
-        
-        // Update model selector if we have model status information
-        updateModelSelector(data.models_status || {simple: true, ensemble: true});
-      })
-      .catch(error => {
-        console.error('API connection error:', error);
-        
-        if (apiStatus) {
-          apiStatus.className = 'api-status offline';
-          apiStatus.textContent = 'Offline';
-        }
-        
-        if (apiMessage) {
-          apiMessage.className = 'api-message error';
-          apiMessage.textContent = `Connection failed: ${error.message}. Is the backend server running?`;
-        }
-        
-        if (summaryText) {
-          summaryText.textContent = 'No connection to API. Using simple offline mode.';
-        }
-        
-        // Save API status to storage
-        safeStorageSet({ apiStatus: 'offline' });
-        
-        // Default to simple model
-        updateModelSelector({simple: true});
-      });
-    }
-    
-    // Update model selector based on available models
-    function updateModelSelector(modelsStatus) {
-      const modelSelector = getElement('model-selector');
-      if (!modelSelector) return;
-      
-      // Save current selection
-      const currentSelection = modelSelector.value;
-      
-      // Clear existing options
-      modelSelector.innerHTML = '';
-      
-      // Add available models
-      if (modelsStatus.ensemble) {
-        const loadingState = modelsStatus.ensemble_loaded ? ' (loaded)' : ' (needs loading)';
-        const loadingTime = modelsStatus.ensemble_loading_time ? ` (~${Math.round(modelsStatus.ensemble_loading_time)}s)` : '';
-        addModelOption(modelSelector, 'ensemble', `Ensemble Model (Best Overall)${loadingState}${loadingTime}`);
-      }
-      
-      if (modelsStatus.attention) {
-        const loadingState = modelsStatus.attention_loaded ? ' (loaded)' : ' (needs loading)';
-        const loadingTime = modelsStatus.attention_loading_time ? ` (~${Math.round(modelsStatus.attention_loading_time)}s)` : '';
-        addModelOption(modelSelector, 'attention', `Attention Model (Detail Focused)${loadingState}${loadingTime}`);
-      }
-      
-      if (modelsStatus.neutral_finetuner) {
-        const loadingState = modelsStatus.neutral_loaded ? ' (loaded)' : ' (needs loading)';
-        const loadingTime = modelsStatus.neutral_loading_time ? ` (~${Math.round(modelsStatus.neutral_loading_time)}s)` : '';
-        addModelOption(modelSelector, 'neutral', `Neutral Model (Balanced)${loadingState}${loadingTime}`);
-      }
-      
-      if (modelsStatus.advanced) {
-        const loadingState = modelsStatus.advanced_loaded ? ' (loaded)' : ' (needs loading)';
-        const loadingTime = modelsStatus.advanced_loading_time ? ` (~${Math.round(modelsStatus.advanced_loading_time)}s)` : '';
-        addModelOption(modelSelector, 'advanced', `Advanced Model (with RAG & BART)${loadingState}${loadingTime}`);
-      }
-      
-      // Always add simple option for offline use
-      addModelOption(modelSelector, 'simple', 'Simple Model (Offline Mode - Always Available)');
-      
-      // Try to restore previous selection
-      let selected = false;
-      for (let i = 0; i < modelSelector.options.length; i++) {
-        if (modelSelector.options[i].value === currentSelection) {
-          modelSelector.value = currentSelection;
-          selected = true;
-          break;
-        }
-      }
-      
-      // Default to best available model if previous selection not available
-      if (!selected) {
-        if (modelsStatus.advanced && modelsStatus.advanced_loaded) {
-          modelSelector.value = 'advanced';
-        } else if (modelsStatus.ensemble && modelsStatus.ensemble_loaded) {
-          modelSelector.value = 'ensemble';
-        } else {
-          modelSelector.value = 'simple';
-        }
-      }
-      
-      // Save the selected model
-      safeStorageSet({ selectedModel: modelSelector.value });
-      console.log(`Model set to: ${modelSelector.value}`);
-    }
-    
-    // Helper to add option to model selector
-    function addModelOption(selector, value, text) {
-      const option = document.createElement('option');
-      option.value = value;
-      option.textContent = text;
-      selector.appendChild(option);
-    }
-    
-    // Analyze text sentiment
-    function analyzeSentiment() {
-      const textInput = getElement('text-input');
-      if (!textInput || !textInput.value.trim()) {
-        alert('Please enter some text to analyze.');
+    // Get the active tab in the current window
+    chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+      if (!tabs || tabs.length === 0) {
+        logDebug('No active tab found');
         return;
       }
       
-      const text = textInput.value.trim();
-      const modelSelector = getElement('model-selector');
-      const modelType = modelSelector ? modelSelector.value : 'simple';
+      const activeTab = tabs[0];
+      logDebug(`Found active tab: ${activeTab.title}`);
       
-      console.log(`Analyzing text with model: ${modelType}`);
-      
-      // Clear previous results
-      resetResultDisplay();
-      
-      // Show loading state
-      const sentimentLabel = getElement('sentiment-label');
-      const summaryContainer = getElement('summary-container');
-      const summaryText = getElement('summary-text');
-      
-      if (sentimentLabel) {
-        sentimentLabel.textContent = 'Analyzing...';
-      }
-      
-      if (summaryText) {
-        summaryText.textContent = 'Generating summary...';
-      }
-      
-      if (summaryContainer) {
-        summaryContainer.style.display = 'block';
-      }
-      
-      // Check if we should use API or local processing
-      if (modelType === 'simple') {
-        // Use simple offline processing
-        const result = processLocalSentiment(text);
+      // Execute a content script to extract text from the page
+      chrome.scripting.executeScript({
+        target: { tabId: activeTab.id },
+        function: extractPageContent
+      }, function(results) {
+        if (chrome.runtime.lastError) {
+          logDebug(`Error executing script: ${chrome.runtime.lastError.message}`);
+          return;
+        }
         
-        // Generate a simple summary for offline mode
-        result.summary = generateSimpleSummary(text);
+        if (!results || results.length === 0 || !results[0].result) {
+          logDebug('No content extracted from page');
+          return;
+        }
         
-        updateResultDisplay(result);
-        saveAnalysisToHistory(text, result);
+        const extractedContent = results[0].result;
+        logDebug(`Extracted content: ${extractedContent.substring(0, 100)}...`);
+        
+        // Fill the textarea with the extracted content
+        const textInput = getElement('text-input');
+        if (textInput) {
+          textInput.value = extractedContent;
+          
+          // Use analyzeWithSummary endpoint for consistent results with content script
+          analyzeExtractedContent(extractedContent);
+        }
+      });
+    });
+  }
+  
+  // Function to analyze content using the same approach as the content script
+  function analyzeExtractedContent(text) {
+    logDebug('Analyzing extracted content');
+    
+    // Show loading state
+    resetResultDisplay();
+    const sentimentLabel = getElement('sentiment-label');
+    if (sentimentLabel) {
+      sentimentLabel.textContent = 'Analyzing...';
+      sentimentLabel.className = 'sentiment-label loading';
+    }
+    
+    // Send the text to the background script for analysis with summary
+    // This matches the approach used in content-scripts/mood_analyzer.js
+    chrome.runtime.sendMessage({ 
+      type: 'analyzeWithSummary', 
+      text: text,
+      options: {
+        preferAdvancedModel: true, // Always use advanced model (BART) just like content script
+        forceGenerateSummary: true // Always generate summary regardless of length
+      }
+    }, function(response) {
+      logDebug('Received analysis response');
+      
+      if (response && !response.error) {
+        // Update results display
+        updateResultDisplay(response);
+        
+        // Save to history
+        saveAnalysisToHistory(text, response);
       } else {
-        // Use the combined endpoint for sentiment and summary
-        fetch(getApiUrl('extension/analyze-with-summary'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          body: JSON.stringify({
-            text: text,
-            model_type: modelType
-          })
-        })
-        .then(response => {
-          console.log(`API responded with status: ${response.status}`);
-          
-          if (!response.ok) {
-            throw new Error(`API returned status ${response.status}`);
+        logDebug(`Analysis error: ${response ? response.error : 'No response'}`);
+        
+        // Fallback to simple model on error (same as content script)
+        const result = processLocalSentiment(text);
+        result.summary = generateSimpleSummary(text, result);
+        if (response && response.error) {
+          result.error = response.error;
+        }
+        
+        // Update results display
+        updateResultDisplay(result);
+        
+        // Show error message
+        const summaryText = getElement('summary-text');
+        if (summaryText && response && response.error) {
+          summaryText.innerHTML = `<div class="api-error">Error contacting API: ${response.error}. Using simple offline model instead.</div>` + summaryText.innerHTML;
+        }
+        
+        // Save to history
+        saveAnalysisToHistory(text, result);
+      }
+    });
+  }
+  
+  // Function to extract content from the page - runs in the context of the webpage
+  function extractPageContent() {
+    // Try to find the main content based on common selectors
+    // Twitter/X tweet
+    if (window.location.hostname.includes('twitter.com') || window.location.hostname.includes('x.com')) {
+      const tweetText = document.querySelector('[data-testid="tweetText"]');
+      if (tweetText) {
+        return tweetText.textContent.trim();
+      }
+    }
+    
+    // LinkedIn post - updated with specific class selector
+    if (window.location.hostname.includes('linkedin.com')) {
+      // Try the specific class for LinkedIn posts
+      const linkedInPosts = document.querySelectorAll('.WqxMNMcWrLmrFTIJOknbFgIXZDwsOuTaLuwBw');
+      
+      if (linkedInPosts && linkedInPosts.length > 0) {
+        console.log('Found LinkedIn posts with specific class', linkedInPosts.length);
+        
+        // Combine text from all posts
+        let combinedText = '';
+        linkedInPosts.forEach(post => {
+          const postText = post.textContent.trim();
+          if (postText) {
+            combinedText += postText + '\n\n';
           }
-          
-          return response.json();
-        })
-        .then(result => {
-          console.log('Analysis result:', result);
-          updateResultDisplay(result);
-          saveAnalysisToHistory(text, result);
-        })
-        .catch(error => {
-          console.error('API analysis error:', error);
-          
-          // Show error
-          if (sentimentLabel) {
-            sentimentLabel.textContent = 'Analysis failed. Falling back to offline mode.';
-          }
-          
-          // Fall back to local processing
-          const result = processLocalSentiment(text);
-          
-          // Add a simple summary for offline mode
-          result.summary = generateSimpleSummary(text);
-          
-          updateResultDisplay(result);
-          saveAnalysisToHistory(text, result);
         });
+        
+        if (combinedText) {
+          return combinedText.trim();
+        }
+      }
+      
+      // Fallback to other LinkedIn selectors if specific class not found
+      const postContent = document.querySelector('.feed-shared-update-v2__description');
+      if (postContent) {
+        return postContent.textContent.trim();
       }
     }
     
-    // Generate a simple summary for offline mode
-    function generateSimpleSummary(text) {
-      // Simple extractive summarization - take first few sentences
-      const sentences = text.split(/(?<=[.!?])\s+/);
-      
-      // If text is short, return as is
-      if (sentences.length <= 3 || text.length < 200) {
-        return text;
+    // Facebook post
+    if (window.location.hostname.includes('facebook.com')) {
+      const postContent = document.querySelector('.x1iorvi4');
+      if (postContent) {
+        return postContent.textContent.trim();
       }
-      
-      // Otherwise take first 2-3 sentences based on text length
-      const numSentences = Math.min(3, Math.max(2, Math.floor(sentences.length / 5)));
-      return sentences.slice(0, numSentences).join(' ');
     }
     
-    // Simple offline sentiment analysis
-    function processLocalSentiment(text) {
-      text = text.toLowerCase();
+    // Reddit post
+    if (window.location.hostname.includes('reddit.com')) {
+      const postContent = document.querySelector('.RichTextJSON-root');
+      if (postContent) {
+        return postContent.textContent.trim();
+      }
       
-      // Expanded lists of sentiment words
-      const positiveWords = [
-        "love", "loving", "loved", "likes", "like", "liked", 
-        "amazing", "excellent", "exceptional", "outstanding",
-        "fantastic", "great", "good", "wonderful", "terrific", 
-        "awesome", "happy", "happiness", "joy", "joyful", 
-        "beautiful", "delightful", "pleasant", "glad", 
-        "pleased", "satisfying", "satisfied", "impressive",
-        "perfect", "brilliant", "superb", "splendid", "enjoy"
-      ];
+      // If that doesn't work, try the post title and body
+      const postTitle = document.querySelector('h1');
+      const postBody = document.querySelector('.RichTextJSON-root, .md');
       
-      const negativeWords = [
-        "hate", "hates", "hated", "hating",
-        "terrible", "awful", "horrible", "worst", 
-        "bad", "disappointing", "disappointed", 
-        "sad", "unhappy", "angry", "furious", "upset", 
-        "annoying", "annoyed", "frustrating", "frustrated",
-        "poor", "mediocre", "inadequate", "inferior",
-        "boring", "worthless", "waste", "disgusting",
-        "dislike", "dislikes", "disliked", "sucks"
-      ];
+      if (postTitle && postBody) {
+        return `${postTitle.textContent}\n\n${postBody.textContent}`;
+      }
+    }
+    
+    // Generic fallbacks if no specific platform content found
+    // Try to find main article content
+    const articleContent = document.querySelector('article, [role="main"], .main-content');
+    if (articleContent) {
+      return articleContent.textContent.trim();
+    }
+    
+    // Try to extract heading and first paragraphs as a fallback
+    const heading = document.querySelector('h1');
+    const paragraphs = Array.from(document.querySelectorAll('p')).slice(0, 5);
+    if (heading && paragraphs.length > 0) {
+      return heading.textContent + '\n\n' +
+          paragraphs
+              .filter(p => p.textContent.trim().length > 0)
+              .map(p => p.textContent)
+              .join('\n\n');
+    }
+    
+    // Last resort - return page title and meta description
+    const metaDescription = document.querySelector('meta[name="description"]');
+    return document.title + (metaDescription ? `\n\n${metaDescription.getAttribute('content')}` : '');
+  }
+  
+  // Initialize tab switching
+  function initializeTabs() {
+    logDebug('Initializing tabs');
+    const tabButtons = document.querySelectorAll('.tab-btn');
+    const tabContents = document.querySelectorAll('.tab-content');
+    
+    // Helper function to switch tabs
+    function switchTab(targetTabId) {
+      logDebug(`Switching to tab: ${targetTabId}`);
       
-      let positiveCount = 0;
-      let negativeCount = 0;
-      
-      // Improved word matching using word boundaries
-      const words = text.split(/\b/);
-      
-      // Count positive and negative words
-      words.forEach(word => {
-        word = word.trim();
-        if (word.length < 2) return; // Skip single characters and empty strings
-        
-        if (positiveWords.includes(word)) {
-          positiveCount++;
-          console.log(`Found positive word: ${word}`);
-        }
-        
-        if (negativeWords.includes(word)) {
-          negativeCount++;
-          console.log(`Found negative word: ${word}`);
-        }
+      // Hide all tab contents and remove active class from all buttons
+      tabContents.forEach(tabContent => {
+        tabContent.classList.remove('active');
       });
       
-      console.log(`Word counts - Positive: ${positiveCount}, Negative: ${negativeCount}`);
+      tabButtons.forEach(btn => {
+        btn.classList.remove('active');
+      });
       
-      let score = 0;
-      let category = 1;
-      let label = 'neutral';
+      // Show target tab content and mark target button as active
+      const targetTab = document.getElementById(`${targetTabId}-tab`);
+      const targetButton = document.querySelector(`.tab-btn[data-tab="${targetTabId}"]`);
       
-      // Improved thresholds for sentiment classification
-      if (positiveCount > 0 && positiveCount > negativeCount) {
-        // Calculate positive score based on ratio and strength
-        score = 0.3 + (0.7 * (positiveCount / (positiveCount + negativeCount || 1)));
-        category = 2;
-        label = 'positive';
-      } else if (negativeCount > 0 && negativeCount >= positiveCount) {
-        // Calculate negative score based on ratio and strength
-        score = -0.3 - (0.7 * (negativeCount / (positiveCount + negativeCount || 1)));
-        category = 0;
-        label = 'negative';
+      if (targetTab) {
+        targetTab.classList.add('active');
+        
+        // Initialize specific tab content if needed
+        if (targetTabId === 'history') {
+          loadHistoryData();
+        } else if (targetTabId === 'visualize') {
+          loadVisualizationData();
+        } else if (targetTabId === 'settings') {
+          loadSettings();
+        }
+      } else {
+        console.error(`Tab with ID ${targetTabId}-tab not found`);
       }
       
-      // If no sentiment words found, keep as neutral
-      if (positiveCount === 0 && negativeCount === 0) {
-        score = 0;
-        category = 1;
-        label = 'neutral';
-      }
-      
-      return {
-        score: score,
-        category: category,
-        label: label,
-        confidence: positiveCount + negativeCount > 0 ? 0.5 + (0.1 * (positiveCount + negativeCount)) : 0.5,
-        model_used: 'simple_offline'
-      };
-    }
-    
-    // Reset result display
-    function resetResultDisplay() {
-      const sentimentLabel = getElement('sentiment-label');
-      const summaryText = getElement('summary-text');
-      
-      if (sentimentLabel) {
-        sentimentLabel.textContent = 'Waiting for analysis...';
-        sentimentLabel.className = 'sentiment-label';
-      }
-      
-      if (summaryText) {
-        summaryText.textContent = '';
-      }
-      
-      // Reset sentiment bars
-      const negativeBar = getElement('negative-bar');
-      const neutralBar = getElement('neutral-bar');
-      const positiveBar = getElement('positive-bar');
-      
-      if (negativeBar) negativeBar.style.width = '0%';
-      if (neutralBar) neutralBar.style.width = '0%';
-      if (positiveBar) positiveBar.style.width = '0%';
-      
-      const negativeValue = getElement('negative-value');
-      const neutralValue = getElement('neutral-value');
-      const positiveValue = getElement('positive-value');
-      
-      if (negativeValue) negativeValue.textContent = '0%';
-      if (neutralValue) neutralValue.textContent = '0%';
-      if (positiveValue) positiveValue.textContent = '0%';
-    }
-    
-    // Update result display with sentiment analysis
-    function updateResultDisplay(result) {
-      console.log('Updating display with result:', result);
-      
-      const sentimentLabel = getElement('sentiment-label');
-      const summaryText = getElement('summary-text');
-      const sentimentScore = getElement('sentiment-score');
-      const sentimentCircle = getElement('sentiment-circle');
-      
-      // Normalize result format
-      const normalizedResult = {
-        score: result.score !== undefined ? result.score : 0,
-        category: result.category !== undefined ? result.category : 1,
-        label: result.label || 'neutral',
-        confidence: result.confidence || 0.5,
-        summary: result.summary || null,
-        model_used: result.model_used || 'unknown'
-      };
-      
-      // Update sentiment circle
-      if (sentimentCircle) {
-        // Determine emoji based on category
-        let emoji = '😐'; // Neutral
-        if (normalizedResult.category === 0) {
-          emoji = '😞'; // Negative
-        } else if (normalizedResult.category === 2) {
-          emoji = '😊'; // Positive
-        }
-        
-        if (sentimentScore) {
-          sentimentScore.textContent = emoji;
-        }
-      }
-      
-      // Update sentiment label
-      if (sentimentLabel) {
-        sentimentLabel.textContent = normalizedResult.label.charAt(0).toUpperCase() + normalizedResult.label.slice(1);
-        
-        // Add appropriate class
-        sentimentLabel.className = 'sentiment-label';
-        if (normalizedResult.category === 0) {
-          sentimentLabel.classList.add('negative');
-        } else if (normalizedResult.category === 1) {
-          sentimentLabel.classList.add('neutral');
-        } else if (normalizedResult.category === 2) {
-          sentimentLabel.classList.add('positive');
-        }
-      }
-      
-      // Update sentiment bars
-      updateSentimentBars(normalizedResult);
-      
-      // Update summary text
-      if (summaryText) {
-        let summary = `This text has a ${normalizedResult.label} sentiment`;
-        
-        if (normalizedResult.confidence) {
-          summary += ` with ${Math.round(normalizedResult.confidence * 100)}% confidence`;
-        }
-        
-        summary += `.`;
-        
-        if (normalizedResult.model_used) {
-          summary += ` Analyzed using ${normalizedResult.model_used} model.`;
-        }
-        
-        // Add BART summary if available
-        if (normalizedResult.summary) {
-          summary += `\n\nText summary: ${normalizedResult.summary}`;
-        }
-        
-        summaryText.textContent = summary;
+      if (targetButton) {
+        targetButton.classList.add('active');
+      } else {
+        console.error(`Button for tab ${targetTabId} not found`);
       }
     }
     
-    // Update sentiment bars
-    function updateSentimentBars(result) {
-      // Convert to bar percentages
-      let negativeValue = 0;
-      let neutralValue = 0;
-      let positiveValue = 0;
-      
-      // Map category to bar values
-      if (result.category === 0) {
-        // Negative
-        negativeValue = 80;
-        neutralValue = 20;
-        positiveValue = 10;
-      } else if (result.category === 1) {
-        // Neutral
-        negativeValue = 20;
-        neutralValue = 70;
-        positiveValue = 20;
-      } else if (result.category === 2) {
-        // Positive
-        negativeValue = 10;
-        neutralValue = 20;
-        positiveValue = 80;
-      }
-      
-      // Fine-tune with confidence if available
-      if (result.confidence) {
-        const confidence = result.confidence;
-        
-        if (result.category === 0) {
-          negativeValue = Math.min(100, negativeValue * confidence * 1.25);
-        } else if (result.category === 1) {
-          neutralValue = Math.min(100, neutralValue * confidence * 1.25);
-        } else if (result.category === 2) {
-          positiveValue = Math.min(100, positiveValue * confidence * 1.25);
+    // Add click event listeners to all tab buttons
+    tabButtons.forEach(button => {
+      button.addEventListener('click', () => {
+        const tabId = button.getAttribute('data-tab');
+        if (tabId) {
+          switchTab(tabId);
         }
-      }
-      
-      // Update the bars
-      const negativeBar = getElement('negative-bar');
-      const neutralBar = getElement('neutral-bar');
-      const positiveBar = getElement('positive-bar');
-      
-      if (negativeBar) negativeBar.style.width = `${negativeValue}%`;
-      if (neutralBar) neutralBar.style.width = `${neutralValue}%`;
-      if (positiveBar) positiveBar.style.width = `${positiveValue}%`;
-      
-      // Update the values
-      const negativeValue_el = getElement('negative-value');
-      const neutralValue_el = getElement('neutral-value');
-      const positiveValue_el = getElement('positive-value');
-      
-      if (negativeValue_el) negativeValue_el.textContent = `${Math.round(negativeValue)}%`;
-      if (neutralValue_el) neutralValue_el.textContent = `${Math.round(neutralValue)}%`;
-      if (positiveValue_el) positiveValue_el.textContent = `${Math.round(positiveValue)}%`;
+      });
+    });
+    
+    // Start with analyze tab active
+    switchTab('analyze');
+  }
+  
+  // Setup all event listeners
+  function setupEventListeners() {
+    // Analyze button
+    const analyzeButton = getElement('analyze-button');
+    if (analyzeButton) {
+      analyzeButton.addEventListener('click', performAnalysis);
     }
     
-    // Save analysis to history
-    function saveAnalysisToHistory(text, result) {
-      safeStorageGet(['analysisHistory'], function(data) {
-        const history = data.analysisHistory || [];
-        
-        // Create new entry
-        const newEntry = {
-          id: Date.now(),
-          timestamp: new Date().toISOString(),
-          text: text.length > 150 ? text.substring(0, 150) + '...' : text,
-          result: result
-        };
-        
-        // Add to beginning of history
-        history.unshift(newEntry);
-        
-        // Keep only recent 50 entries
-        const trimmedHistory = history.slice(0, 50);
-        
-        // Save back to storage
-        safeStorageSet({ analysisHistory: trimmedHistory });
-        console.log('Saved analysis to history');
+    // Theme selector
+    const themeSelector = getElement('theme-selector');
+    if (themeSelector) {
+      themeSelector.addEventListener('change', function() {
+        const selectedTheme = themeSelector.value;
+        saveToStorage({ 'theme': selectedTheme });
+        applyTheme(selectedTheme);
       });
     }
     
-    // Initialize history tab
-    function initializeHistoryTab() {
-      const historyList = getElement('history-list');
-      if (!historyList) return;
-      
-      // Load history from storage
-      safeStorageGet(['analysisHistory'], function(data) {
-        const history = data.analysisHistory || [];
-        
-        if (history.length === 0) {
-          historyList.innerHTML = '<div class="empty-history-message">No history items yet. Analyze some text to see it here.</div>';
-          return;
-        }
-        
-        // Clear list
-        historyList.innerHTML = '';
-        
-        // Add each history item
-        history.forEach(item => {
-          const historyItem = document.createElement('div');
-          historyItem.className = 'history-item';
-          
-          // Format date
-          const date = new Date(item.timestamp);
-          const formattedDate = `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
-          
-          // Get sentiment info
-          const sentiment = item.result.label || 'neutral';
-          const sentimentClass = sentiment.toLowerCase();
-          
-          // Create HTML for item
-          historyItem.innerHTML = `
-            <div class="history-item-header">
-              <span class="history-item-date">${formattedDate}</span>
-              <span class="history-item-sentiment ${sentimentClass}">${sentiment}</span>
-            </div>
-            <div class="history-item-text">${item.text}</div>
-          `;
-          
-          // Add to list
-          historyList.appendChild(historyItem);
-          
-          // Add click handler to reanalyze
-          historyItem.addEventListener('click', function() {
-            const textInput = getElement('text-input');
-            if (textInput) {
-              textInput.value = item.text;
-              
-              // Switch to analyze tab
-              const analyzeBtn = document.querySelector('.tab-btn[data-tab="analyze"]');
-              if (analyzeBtn) {
-                analyzeBtn.click();
-              }
-              
-              // Analyze the text
-              analyzeSentiment();
-            }
-          });
-        });
+    // Auto-analyze toggle
+    const autoAnalyzeToggle = getElement('auto-analyze-toggle');
+    if (autoAnalyzeToggle) {
+      autoAnalyzeToggle.addEventListener('change', function() {
+        saveToStorage({ 'autoAnalyze': autoAnalyzeToggle.checked });
       });
     }
     
-    // Initialize settings tab
-    function initializeSettings() {
+    // API URL update button
+    const updateApiUrlBtn = getElement('update-api-url-btn');
+    if (updateApiUrlBtn) {
+      updateApiUrlBtn.addEventListener('click', updateApiUrl);
+    }
+    
+    // Test API button
+    const testApiBtn = getElement('test-api-btn');
+    if (testApiBtn) {
+      testApiBtn.addEventListener('click', testApiConnection);
+    }
+    
+    // Clear history button
+    const clearHistoryBtn = getElement('clear-history-btn');
+    if (clearHistoryBtn) {
+      clearHistoryBtn.addEventListener('click', clearHistory);
+    }
+    
+    // History filter
+    const historyFilter = getElement('history-filter');
+    if (historyFilter) {
+      historyFilter.addEventListener('change', function() {
+        loadHistoryData(historyFilter.value);
+      });
+    }
+    
+    // Visualization filter
+    const visualizationFilter = getElement('visualization-filter');
+    if (visualizationFilter) {
+      visualizationFilter.addEventListener('change', function() {
+        loadVisualizationData(visualizationFilter.value);
+      });
+    }
+    
+    // Graph type radio buttons
+    const graphTypeRadios = document.querySelectorAll('input[name="graph-type"]');
+    graphTypeRadios.forEach(radio => {
+      radio.addEventListener('change', function() {
+        if (this.checked) {
+          updateDistributionChart(this.value);
+        }
+      });
+    });
+  }
+  
+  // Initialize debug console
+  function initializeDebugConsole() {
+    const toggleDebugBtn = getElement('toggle-debug');
+    const debugContainer = getElement('debug-container');
+    const clearDebugBtn = getElement('clear-debug-btn');
+    const debugOutput = getElement('debug-output');
+    
+    if (toggleDebugBtn && debugContainer) {
+      toggleDebugBtn.addEventListener('click', function() {
+        debugContainer.style.display = debugContainer.style.display === 'none' ? 'block' : 'none';
+      });
+    }
+    
+    if (clearDebugBtn && debugOutput) {
+      clearDebugBtn.addEventListener('click', function() {
+        debugOutput.value = '';
+      });
+    }
+    
+    logDebug('Debug console initialized');
+  }
+  
+  // Initialize theme
+  function initializeTheme() {
+    loadFromStorage({ 'theme': 'light' }, function(data) {
       const themeSelector = getElement('theme-selector');
-      const autoAnalyzeToggle = getElement('auto-analyze-toggle');
-      const updateApiUrlBtn = getElement('update-api-url-btn');
-      const testApiBtn = getElement('test-api-btn');
-      const apiUrlInput = getElement('api-url-input');
-      const apiUrlDisplay = getElement('api-url-display');
-      
-      // Load settings from storage
-      safeStorageGet(['theme', 'autoAnalyze', 'apiUrl'], function(data) {
-        // Set theme
-        if (themeSelector && data.theme) {
-          themeSelector.value = data.theme;
-          applyTheme(data.theme);
-        }
-        
-        // Set auto-analyze
-        if (autoAnalyzeToggle && data.autoAnalyze !== undefined) {
-          autoAnalyzeToggle.checked = data.autoAnalyze;
-        }
-        
-        // Set API URL
-        if (apiUrlInput && data.apiUrl) {
-          // Extract host part for input
-          const url = new URL(data.apiUrl);
-          apiUrlInput.value = `${url.hostname}${url.port ? ':' + url.port : ''}`;
-        } else if (apiUrlInput) {
-          apiUrlInput.value = 'localhost:5000';
-        }
-        
-        // Update display
-        if (apiUrlDisplay) {
-          apiUrlDisplay.textContent = data.apiUrl || 'http://localhost:5000';
-        }
-      });
-      
-      // Theme selector change handler
       if (themeSelector) {
-        themeSelector.addEventListener('change', function() {
-          const theme = themeSelector.value;
-          applyTheme(theme);
-          safeStorageSet({ theme: theme });
-        });
+        themeSelector.value = data.theme;
       }
-      
-      // Auto-analyze toggle handler
-      if (autoAnalyzeToggle) {
-        autoAnalyzeToggle.addEventListener('change', function() {
-          safeStorageSet({ autoAnalyze: autoAnalyzeToggle.checked });
-        });
-      }
-      
-      // Update API URL button handler
-      if (updateApiUrlBtn && apiUrlInput) {
-        updateApiUrlBtn.addEventListener('click', function() {
-          const protocolSelect = getElement('api-protocol-select');
-          const protocol = protocolSelect ? protocolSelect.value : 'http';
-          const host = apiUrlInput.value.trim().replace(/^https?:\/\//, '');
-          
-          const newApiUrl = `${protocol}://${host}`;
-          
-          // Update display
-          if (apiUrlDisplay) {
-            apiUrlDisplay.textContent = newApiUrl;
-          }
-          
-          // Save to storage
-          safeStorageSet({ apiUrl: newApiUrl }, function() {
-            console.log(`API URL updated to: ${newApiUrl}`);
-            // Test the connection
-            testApiConnection();
-          });
-        });
-      }
-      
-      // Test API button handler
-      if (testApiBtn) {
-        testApiBtn.addEventListener('click', function() {
-          testApiConnection();
-        });
-      }
-    }
+      applyTheme(data.theme);
+    });
+  }
+  
+  // Apply theme to the UI
+  function applyTheme(theme) {
+    logDebug(`Applying theme: ${theme}`);
+    const body = document.body;
+    body.classList.remove('light-theme', 'dark-theme');
     
-    // Apply theme
-    function applyTheme(theme) {
-      const body = document.body;
-      
-      // Remove existing theme classes
-      body.classList.remove('light-theme', 'dark-theme');
-      
-      // Add appropriate class
-      if (theme === 'dark') {
+    if (theme === 'dark') {
+      body.classList.add('dark-theme');
+    } else if (theme === 'system') {
+      // Check system preference
+      if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
         body.classList.add('dark-theme');
-      } else if (theme === 'light') {
+      } else {
         body.classList.add('light-theme');
-      } else if (theme === 'system') {
-        // Check system preference
-        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-          body.classList.add('dark-theme');
-        } else {
-          body.classList.add('light-theme');
-        }
       }
+    } else {
+      body.classList.add('light-theme');
+    }
+  }
+  
+  // Load history data and populate history tab
+  function loadHistoryData(filter = 'all') {
+    logDebug(`Loading history data with filter: ${filter}`);
+    const historyList = getElement('history-list');
+    
+    if (!historyList) {
+      console.error('History list element not found');
+      return;
     }
     
-    // Initialize debug panel
-    function initializeDebugPanel() {
-      const toggleDebugBtn = getElement('toggle-debug');
-      const debugContainer = getElement('debug-container');
-      const clearDebugBtn = getElement('clear-debug-btn');
-      
-      if (toggleDebugBtn && debugContainer) {
-        toggleDebugBtn.addEventListener('click', function() {
-          debugContainer.style.display = debugContainer.style.display === 'none' ? 'block' : 'none';
-        });
-      }
-      
-      if (clearDebugBtn) {
-        clearDebugBtn.addEventListener('click', function() {
-          const debugOutput = getElement('debug-output');
-          if (debugOutput) {
-            debugOutput.innerHTML = '';
-            logToDebug('Debug console cleared');
-          }
-        });
-      }
-    }
+    // Clear previous history items
+    historyList.innerHTML = '';
     
-    // Initialize all UI components
-    function initializeUI() {
-      // Set up tabs
-      initializeTabs();
+    // Load history from storage
+    loadFromStorage({ 'analysisHistory': [] }, function(data) {
+      let history = data.analysisHistory || [];
       
-      // Set up analyze button
-      const analyzeButton = getElement('analyze-button');
-      if (analyzeButton) {
-        analyzeButton.addEventListener('click', analyzeSentiment);
+      // Apply filter
+      if (filter === 'today') {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        history = history.filter(item => new Date(item.timestamp) >= today);
+      } else if (filter === 'week') {
+        const weekAgo = new Date();
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        history = history.filter(item => new Date(item.timestamp) >= weekAgo);
       }
-      
-      // Set up model selector
-      const modelSelector = getElement('model-selector');
-      if (modelSelector) {
-        modelSelector.addEventListener('change', function() {
-          safeStorageSet({ selectedModel: modelSelector.value });
-        });
-      }
-      
-      // Set up history tab
-      const historyTab = document.querySelector('.tab-btn[data-tab="history"]');
-      if (historyTab) {
-        historyTab.addEventListener('click', initializeHistoryTab);
-      }
-      
-      // Initialize settings
-      initializeSettings();
-      
-      // Initialize debug panel
-      initializeDebugPanel();
-      
-      // Test API connection
-      testApiConnection();
-      
-      console.log('UI initialization complete');
-    }
-    
-    // Initialize visualization tab
-    function initializeVisualizationTab() {
-      console.log('Initializing visualization tab');
-      
-      // Get filter dropdown
-      const visualizationFilter = getElement('visualization-filter');
-      
-      // Load history from storage and create visualizations
-      safeStorageGet(['analysisHistory'], function(data) {
-        const history = data.analysisHistory || [];
-        
-        if (history.length === 0) {
-          // Show empty state for each visualization panel
-          const emptyMessage = '<div class="empty-visualization-message">No data available. Analyze some text to see visualizations.</div>';
-          document.querySelector('.timeline-container').innerHTML = emptyMessage;
-          document.querySelector('.wordcloud-container').innerHTML = emptyMessage;
-          document.querySelector('.interactive-graph-container').innerHTML = emptyMessage;
-          return;
-        }
-        
-        // Create the visualizations
-        createSentimentTimeline(history);
-        createWordCloud(history);
-        createInteractiveSentimentGraph(history, 'pie'); // Default to pie chart
-        
-        // Set up filter change handler
-        if (visualizationFilter) {
-          visualizationFilter.addEventListener('change', function() {
-            const filteredHistory = filterHistoryByTimeRange(history, visualizationFilter.value);
-            createSentimentTimeline(filteredHistory);
-            createWordCloud(filteredHistory);
-            
-            // Get current graph type
-            const graphType = document.querySelector('input[name="graph-type"]:checked').value;
-            createInteractiveSentimentGraph(filteredHistory, graphType);
-          });
-        }
-        
-        // Set up graph type radio buttons
-        const graphTypeRadios = document.querySelectorAll('input[name="graph-type"]');
-        graphTypeRadios.forEach(radio => {
-          radio.addEventListener('change', function() {
-            const filteredHistory = filterHistoryByTimeRange(history, visualizationFilter.value);
-            createInteractiveSentimentGraph(filteredHistory, this.value);
-          });
-        });
-      });
-    }
-    
-    // Filter history by time range
-    function filterHistoryByTimeRange(history, timeRange) {
-      const now = new Date();
-      
-      switch(timeRange) {
-        case 'today':
-          // Filter for items from today
-          return history.filter(item => {
-            const itemDate = new Date(item.timestamp);
-            return itemDate.getDate() === now.getDate() &&
-                   itemDate.getMonth() === now.getMonth() &&
-                   itemDate.getFullYear() === now.getFullYear();
-          });
-        case 'week':
-          // Filter for items from this week (last 7 days)
-          const weekAgo = new Date(now);
-          weekAgo.setDate(now.getDate() - 7);
-          return history.filter(item => new Date(item.timestamp) >= weekAgo);
-        case 'month':
-          // Filter for items from this month (last 30 days)
-          const monthAgo = new Date(now);
-          monthAgo.setDate(now.getDate() - 30);
-          return history.filter(item => new Date(item.timestamp) >= monthAgo);
-        default:
-          // All history
-          return history;
-      }
-    }
-    
-    // Create sentiment timeline chart
-    function createSentimentTimeline(history) {
-      const container = document.querySelector('.timeline-container');
-      if (!container) return;
-      
-      // Clear previous chart
-      container.innerHTML = '';
       
       if (history.length === 0) {
-        container.innerHTML = '<div class="empty-visualization-message">No data available for the selected time range.</div>';
+        historyList.innerHTML = '<div class="empty-history-message">No history items yet. Analyze some text to see it here.</div>';
         return;
       }
       
-      // Create canvas element
-      const canvas = document.createElement('canvas');
-      canvas.id = 'sentiment-timeline';
-      container.appendChild(canvas);
+      // Sort history by timestamp (newest first)
+      history.sort((a, b) => b.timestamp - a.timestamp);
       
-      // Prepare data
-      const timeData = [];
-      const sentimentData = [];
-      
-      // Sort by timestamp
-      history.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-      
+      // Add history items to the list
       history.forEach(item => {
-        // Convert timestamp to readable format
-        const date = new Date(item.timestamp);
-        timeData.push(date.toLocaleString());
+        const historyItem = document.createElement('div');
+        historyItem.className = 'history-item';
         
-        // Convert sentiment to numerical value (-1 to 1)
-        let sentimentValue = 0;
-        if (item.result && item.result.score !== undefined) {
-          sentimentValue = item.result.score;
-        } else if (item.result && item.result.category !== undefined) {
-          // Map category to a score: negative=0, neutral=1, positive=2
-          sentimentValue = item.result.category === 0 ? -0.7 : (item.result.category === 2 ? 0.7 : 0);
+        const timestamp = new Date(item.timestamp);
+        const formattedDate = timestamp.toLocaleDateString();
+        const formattedTime = timestamp.toLocaleTimeString();
+        
+        // Determine sentiment class
+        let sentimentClass = 'neutral';
+        if (item.category === 0 || item.label === 'negative') {
+          sentimentClass = 'negative';
+        } else if (item.category === 2 || item.label === 'positive') {
+          sentimentClass = 'positive';
         }
         
-        sentimentData.push(sentimentValue);
+        // Truncate text if it's too long
+        const truncatedText = item.text.length > 100 ? item.text.substring(0, 97) + '...' : item.text;
+        
+        historyItem.innerHTML = `
+          <div class="history-item-header">
+            <span class="history-timestamp">${formattedDate} ${formattedTime}</span>
+            <span class="history-sentiment ${sentimentClass}">${item.label || 'Unknown'}</span>
+          </div>
+          <div class="history-item-text">${truncatedText}</div>
+          <div class="history-item-footer">
+            <span class="history-model">Model: ${item.model_used || 'Unknown'}</span>
+            <button class="history-analyze-again" data-text="${item.text.replace(/"/g, '&quot;')}">Analyze Again</button>
+          </div>
+        `;
+        
+        historyList.appendChild(historyItem);
       });
       
-      console.log('Timeline data prepared:', timeData.length, 'points');
+      // Add event listeners to "Analyze Again" buttons
+      const analyzeAgainButtons = document.querySelectorAll('.history-analyze-again');
+      analyzeAgainButtons.forEach(button => {
+        button.addEventListener('click', function() {
+          const text = this.getAttribute('data-text');
+          if (text) {
+            // Switch to analyze tab
+            const analyzeButton = document.querySelector('.tab-btn[data-tab="analyze"]');
+            if (analyzeButton) {
+              analyzeButton.click();
+            }
+            
+            // Set the text and perform analysis
+            const textInput = getElement('text-input');
+            if (textInput) {
+              textInput.value = text;
+              performAnalysis();
+            }
+          }
+        });
+      });
+    });
+  }
+  
+  // Clear history
+  function clearHistory() {
+    if (confirm('Are you sure you want to clear all history? This cannot be undone.')) {
+      saveToStorage({ 'analysisHistory': [] }, function(success) {
+        if (success) {
+          loadHistoryData(); // Refresh the history tab
+          logDebug('History cleared');
+        }
+      });
+    }
+  }
+  
+  // Load and display visualization data
+  function loadVisualizationData(filter = 'all') {
+    logDebug(`Loading visualization data with filter: ${filter}`);
+    
+    // Load history from storage
+    loadFromStorage({ 'analysisHistory': [] }, function(data) {
+      let history = data.analysisHistory || [];
       
-      // Create the chart
-      const ctx = canvas.getContext('2d');
-      window.sentimentTimelineChart = new Chart(ctx, {
+      // Apply filter
+      if (filter === 'today') {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        history = history.filter(item => new Date(item.timestamp) >= today);
+      } else if (filter === 'week') {
+        const weekAgo = new Date();
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        history = history.filter(item => new Date(item.timestamp) >= weekAgo);
+      } else if (filter === 'month') {
+        const monthAgo = new Date();
+        monthAgo.setMonth(monthAgo.getMonth() - 1);
+        history = history.filter(item => new Date(item.timestamp) >= monthAgo);
+      }
+      
+      if (history.length === 0) {
+        const visualizationPanels = document.querySelectorAll('.visualization-panel');
+        visualizationPanels.forEach(panel => {
+          panel.innerHTML = '<div class="empty-visualization-message">No history data available for visualization. Analyze some text first.</div>';
+        });
+        return;
+      }
+      
+      // Create timeline chart
+      createTimelineChart(history);
+      
+      
+      // Create distribution chart - get selected type
+      const selectedChartType = document.querySelector('input[name="graph-type"]:checked')?.value || 'pie';
+      createDistributionChart(history, selectedChartType);
+    });
+  }
+  
+  // Create timeline chart showing sentiment over time
+  function createTimelineChart(history) {
+    const container = getElement('sentiment-timeline');
+    if (!container || history.length < 2) {
+      if (container) {
+        const panel = container.closest('.visualization-panel');
+        if (panel) {
+          panel.innerHTML = '<div class="empty-visualization-message">Not enough data for timeline visualization. Analyze more text to see a timeline.</div>';
+        }
+      }
+      return;
+    }
+    
+    // Sort history by timestamp (oldest first)
+    const sortedHistory = [...history].sort((a, b) => a.timestamp - b.timestamp);
+    
+    // Prepare data for chart
+    const labels = [];
+    const sentimentScores = [];
+    
+    sortedHistory.forEach(item => {
+      // Format date for label
+      const date = new Date(item.timestamp);
+      labels.push(date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}));
+      
+      // Get sentiment score
+      let score = 0;
+      if (item.score !== undefined) {
+        score = item.score;
+      } else if (item.category === 0) {
+        score = -0.7; // Negative
+      } else if (item.category === 2) {
+        score = 0.7; // Positive
+      }
+      
+      sentimentScores.push(score);
+    });
+    
+    // Create chart
+    try {
+      // Check if there's an existing chart and destroy it
+      if (window.timelineChart) {
+        window.timelineChart.destroy();
+      }
+      
+      // Create new chart
+      window.timelineChart = new Chart(container, {
         type: 'line',
         data: {
-          labels: timeData,
+          labels: labels,
           datasets: [{
             label: 'Sentiment Score',
-            data: sentimentData,
-            backgroundColor: 'rgba(54, 162, 235, 0.2)',
-            borderColor: 'rgba(54, 162, 235, 1)',
+            data: sentimentScores,
+            borderColor: 'rgb(75, 192, 192)',
+            backgroundColor: 'rgba(75, 192, 192, 0.2)',
             borderWidth: 2,
-            pointBackgroundColor: sentimentData.map(value => {
-              // Color points based on sentiment: red for negative, gray for neutral, green for positive
-              if (value < -0.3) return 'rgba(255, 99, 132, 1)';
-              if (value > 0.3) return 'rgba(75, 192, 192, 1)';
-              return 'rgba(153, 102, 255, 1)';
-            }),
-            pointBorderColor: '#fff',
-            pointRadius: 5,
-            tension: 0.1
+            tension: 0.4,
+            fill: true
           }]
         },
         options: {
@@ -1208,148 +614,104 @@ document.addEventListener('DOMContentLoaded', function() {
           maintainAspectRatio: false,
           scales: {
             y: {
+              beginAtZero: false,
               min: -1,
               max: 1,
               ticks: {
                 callback: function(value) {
                   if (value === -1) return 'Very Negative';
+                  if (value === -0.5) return 'Negative';
                   if (value === 0) return 'Neutral';
+                  if (value === 0.5) return 'Positive';
                   if (value === 1) return 'Very Positive';
                   return '';
                 }
               }
-            },
-            x: {
-              ticks: {
-                maxRotation: 45,
-                minRotation: 45
-              }
             }
           },
           plugins: {
+            legend: {
+              display: true,
+              position: 'top'
+            },
             tooltip: {
               callbacks: {
                 label: function(context) {
-                  const value = context.raw;
+                  const score = context.raw;
                   let sentiment = 'Neutral';
-                  if (value < -0.3) sentiment = 'Negative';
-                  if (value > 0.3) sentiment = 'Positive';
-                  return `Sentiment: ${sentiment} (${value.toFixed(2)})`;
-                },
-                afterLabel: function(context) {
-                  const index = context.dataIndex;
-                  return `Text: ${history[index].text.substring(0, 50)}...`;
+                  if (score <= -0.7) sentiment = 'Very Negative';
+                  else if (score < 0) sentiment = 'Negative';
+                  else if (score >= 0.7) sentiment = 'Very Positive';
+                  else if (score > 0) sentiment = 'Positive';
+                  return `Sentiment: ${sentiment} (${score.toFixed(2)})`;
                 }
               }
             }
           }
         }
       });
+      
+      logDebug('Timeline chart created');
+    } catch (error) {
+      console.error('Error creating timeline chart:', error);
+      logDebug(`Error creating timeline chart: ${error.message}`);
     }
-    
-    // Create word cloud visualization
-    function createWordCloud(history) {
-      const container = document.querySelector('.wordcloud-container');
-      if (!container) return;
-      
-      // Clear previous content
-      container.innerHTML = '';
-      
-      if (history.length === 0) {
-        container.innerHTML = '<div class="empty-visualization-message">No data available for the selected time range.</div>';
-        return;
-      }
-      
-      // Create placeholder message with info about the word cloud being disabled
-      const placeholderDiv = document.createElement('div');
-      placeholderDiv.className = 'word-cloud-placeholder';
-      placeholderDiv.style.textAlign = 'center';
-      placeholderDiv.style.padding = '40px 20px';
-      placeholderDiv.style.color = 'var(--text-secondary)';
-      placeholderDiv.style.fontSize = '14px';
-      placeholderDiv.innerHTML = 'Sentiment Word Cloud has been disabled in this version.';
-      
-      container.appendChild(placeholderDiv);
-      
-      console.log('Word cloud visualization has been disabled');
-    }
-    
-    // Create interactive sentiment graph
-    function createInteractiveSentimentGraph(history, chartType) {
-      const container = document.querySelector('.interactive-graph-container');
-      if (!container) return;
-      
-      // Clear previous chart
-      container.innerHTML = '';
-      
-      if (history.length === 0) {
-        container.innerHTML = '<div class="empty-visualization-message">No data available for the selected time range.</div>';
-        return;
-      }
-      
-      // Create canvas element
-      const canvas = document.createElement('canvas');
-      canvas.id = 'interactive-sentiment-graph';
-      container.appendChild(canvas);
-      
-      console.log('Creating interactive graph with chart type:', chartType);
-      
-      // Count sentiment categories
-      let negativeCount = 0;
-      let neutralCount = 0;
-      let positiveCount = 0;
-      
-      history.forEach(item => {
-        if (item.result && (
-            item.result.category === 0 || 
-            (item.result.score !== undefined && item.result.score < -0.3)
-          )) {
-          negativeCount++;
-        } else if (item.result && (
-            item.result.category === 2 || 
-            (item.result.score !== undefined && item.result.score > 0.3)
-          )) {
-          positiveCount++;
-        } else {
-          neutralCount++;
+  }
+  
+  // Create distribution chart (pie, radar, or polar area)
+  function createDistributionChart(history, chartType = 'pie') {
+    const container = getElement('interactive-sentiment-graph');
+    if (!container || history.length === 0) {
+      if (container) {
+        const panel = container.closest('.visualization-panel');
+        if (panel) {
+          panel.innerHTML = '<div class="empty-visualization-message">No data available for sentiment distribution visualization.</div>';
         }
-      });
-      
-      console.log(`Sentiment distribution - Positive: ${positiveCount}, Neutral: ${neutralCount}, Negative: ${negativeCount}`);
-      
-      // Only proceed if we have data to show
-      if (positiveCount === 0 && neutralCount === 0 && negativeCount === 0) {
-        container.innerHTML = '<div class="empty-visualization-message">No sentiment data available.</div>';
-        return;
+      }
+      return;
+    }
+    
+    // Count sentiment categories
+    let negativeCount = 0;
+    let neutralCount = 0;
+    let positiveCount = 0;
+    
+    history.forEach(item => {
+      if (item.category === 0 || item.label === 'negative') {
+        negativeCount++;
+      } else if (item.category === 2 || item.label === 'positive') {
+        positiveCount++;
+      } else {
+        neutralCount++;
+      }
+    });
+    
+    // Create chart
+    try {
+      // Check if there's an existing chart and destroy it
+      if (window.distributionChart) {
+        window.distributionChart.destroy();
       }
       
-      // Fix chart type naming - "polar" should be "polarArea" in Chart.js
-      if (chartType === 'polar') {
-        chartType = 'polarArea';
-      }
+      // Determine chart type
+      const type = chartType === 'radar' ? 'radar' : (chartType === 'polar' ? 'polarArea' : 'doughnut');
       
-      console.log(`Using corrected chart type: ${chartType}`);
-      
-      // Set up chart config based on type
-      const ctx = canvas.getContext('2d');
-      
-      // Chart configuration
-      let chartConfig = {
-        type: chartType,
+      // Create new chart
+      window.distributionChart = new Chart(container, {
+        type: type,
         data: {
-          labels: ['Positive', 'Neutral', 'Negative'],
+          labels: ['Negative', 'Neutral', 'Positive'],
           datasets: [{
-            label: 'Sentiment Distribution',
-            data: [positiveCount, neutralCount, negativeCount],
+            data: [negativeCount, neutralCount, positiveCount],
             backgroundColor: [
-              'rgba(76, 175, 80, 0.7)', // Green for positive
-              'rgba(158, 158, 158, 0.7)', // Gray for neutral
-              'rgba(244, 67, 54, 0.7)' // Red for negative
+              'rgba(255, 99, 132, 0.7)',
+              'rgba(255, 205, 86, 0.7)',
+              'rgba(75, 192, 192, 0.7)'
             ],
             borderColor: [
-              'rgba(76, 175, 80, 1)',
-              'rgba(158, 158, 158, 1)',
-              'rgba(244, 67, 54, 1)'
+              'rgb(255, 99, 132)',
+              'rgb(255, 205, 86)',
+              'rgb(75, 192, 192)'
             ],
             borderWidth: 1
           }]
@@ -1364,371 +726,1043 @@ document.addEventListener('DOMContentLoaded', function() {
             tooltip: {
               callbacks: {
                 label: function(context) {
-                  const label = context.label || '';
-                  const value = context.raw || 0;
+                  const value = context.raw;
                   const total = negativeCount + neutralCount + positiveCount;
-                  const percentage = Math.round((value / total) * 100);
-                  return `${label}: ${value} (${percentage}%)`;
+                  const percentage = ((value / total) * 100).toFixed(1);
+                  return `${context.label}: ${value} (${percentage}%)`;
                 }
               }
             }
           }
         }
-      };
-      
-      // Customize options based on chart type
-      if (chartType === 'radar' || chartType === 'polarArea') {
-        chartConfig.options.scales = {
-          r: {
-            min: 0,
-            ticks: {
-              display: false
-            }
-          }
-        };
-      }
-      
-      // Create the chart
-      try {
-        window.interactiveSentimentChart = new Chart(ctx, chartConfig);
-        console.log('Interactive chart created successfully');
-      } catch (error) {
-        console.error('Error creating chart:', error);
-        container.innerHTML = `<div class="empty-visualization-message">Error creating chart: ${error.message}</div>`;
-      }
-    }
-    
-    // More initialization code
-    initializeTabs();
-    testApiConnection();
-    
-    // Set up analyze button
-    const analyzeButton = getElement('analyze-button');
-    if (analyzeButton) {
-      analyzeButton.addEventListener('click', () => {
-        console.log('Analyze button clicked');
-        performAnalysis();
       });
+      
+      logDebug(`Distribution chart (${chartType}) created`);
+    } catch (error) {
+      console.error(`Error creating ${chartType} chart:`, error);
+      logDebug(`Error creating ${chartType} chart: ${error.message}`);
+    }
+  }
+  
+  // Update distribution chart type
+  function updateDistributionChart(chartType) {
+    logDebug(`Updating distribution chart type to: ${chartType}`);
+    loadFromStorage({ 'analysisHistory': [] }, function(data) {
+      const history = data.analysisHistory || [];
+      createDistributionChart(history, chartType);
+    });
+  }
+    
+  // Load settings
+  function loadSettings() {
+    logDebug('Loading settings');
+    
+    // Load settings from storage
+    loadFromStorage({
+      'theme': 'light',
+      'autoAnalyze': false,
+      'apiUrl': 'http://localhost:5000'
+    }, function(data) {
+      // Apply theme
+      const themeSelector = getElement('theme-selector');
+      if (themeSelector) {
+        themeSelector.value = data.theme;
+      }
+      
+      // Set auto-analyze toggle
+      const autoAnalyzeToggle = getElement('auto-analyze-toggle');
+      if (autoAnalyzeToggle) {
+        autoAnalyzeToggle.checked = data.autoAnalyze;
+      }
+      
+      // Set API URL display and inputs
+      const apiUrlDisplay = getElement('api-url-display');
+      const apiProtocolSelect = getElement('api-protocol-select');
+      const apiUrlInput = getElement('api-url-input');
+      
+      if (apiUrlDisplay) {
+        apiUrlDisplay.textContent = data.apiUrl;
+      }
+      
+      if (apiProtocolSelect && apiUrlInput && data.apiUrl) {
+        try {
+          const url = new URL(data.apiUrl);
+          apiProtocolSelect.value = url.protocol.replace(':', '');
+          apiUrlInput.value = url.host + url.pathname.replace(/\/$/, '');
+        } catch (e) {
+          console.error('Error parsing API URL:', e);
+          apiProtocolSelect.value = 'http';
+          apiUrlInput.value = 'localhost:5000';
+        }
+      }
+    });
+  }
+  
+  // Update API URL
+  function updateApiUrl() {
+    const apiProtocolSelect = getElement('api-protocol-select');
+    const apiUrlInput = getElement('api-url-input');
+    const apiUrlDisplay = getElement('api-url-display');
+    const apiMessage = getElement('api-message');
+    
+    if (!apiProtocolSelect || !apiUrlInput) {
+      return;
     }
     
-    // Function to perform sentiment analysis with summarization
-    function performAnalysis() {
-      const textInput = getElement('text-input');
-      if (!textInput || !textInput.value.trim()) {
-        alert('Please enter some text to analyze.');
-        return;
+    const protocol = apiProtocolSelect.value;
+    const host = apiUrlInput.value.trim();
+    
+    if (!host) {
+      if (apiMessage) {
+        apiMessage.textContent = 'Please enter a valid API host';
+        apiMessage.className = 'api-message error';
       }
-      
-      const text = textInput.value.trim();
-      const modelSelector = getElement('model-selector');
-      const modelType = modelSelector ? modelSelector.value : 'simple';
-      
-      console.log(`Analyzing text with model: ${modelType}`);
-      
-      // Clear previous results
-      resetResultDisplay();
-      
-      // Show loading state
-      const sentimentLabel = getElement('sentiment-label');
-      const summaryContainer = getElement('summary-container');
-      const summaryText = getElement('summary-text');
-      
-      if (sentimentLabel) {
-        sentimentLabel.textContent = 'Analyzing...';
-      }
-      
-      if (summaryText) {
-        summaryText.textContent = 'Generating summary...';
-      }
-      
-      if (summaryContainer) {
-        summaryContainer.style.display = 'block';
-      }
-      
-      // Use the combined analyze with summary request
-      safeSendMessage({ 
-        type: 'analyzeWithSummary', 
-        text: text,
-        options: {
-          model: modelType,
-          preferAdvancedModel: true
-        }
-      }, (result) => {
-        console.log('Received analysis result:', result);
-        
-        if (result.error) {
-          console.error('Error in analysis:', result.error);
-          if (sentimentLabel) {
-            sentimentLabel.textContent = 'Error: ' + result.error;
-          }
-          if (summaryText) {
-            summaryText.textContent = 'Could not generate summary due to an error.';
-          }
-          return;
+      return;
+    }
+    
+    // Construct the new API URL
+    const apiUrl = `${protocol}://${host.replace(/^\/*/, '').replace(/\/*$/, '')}`;
+    
+    // Save to storage
+    saveToStorage({ 'apiUrl': apiUrl }, function(success) {
+      if (success) {
+        if (apiUrlDisplay) {
+          apiUrlDisplay.textContent = apiUrl;
         }
         
-        // Update result display with sentiment
-        updateResultDisplay(result);
-        
-        // Display summary if available
-        if (summaryText && result.summary) {
-          summaryText.textContent = result.summary;
-        } else if (summaryText) {
-          summaryText.textContent = 'No summary available for this text.';
+        if (apiMessage) {
+          apiMessage.textContent = `API URL updated to: ${apiUrl}`;
+          apiMessage.className = 'api-message success';
         }
         
-        // Save to history
-        saveAnalysisToHistory(text, result);
+        // Test the connection with the new URL
+        testApiConnection();
+      }
+    });
+    
+    logDebug(`API URL updated to: ${apiUrl}`);
+  }
+  
+  // Test API connection
+  function testApiConnection() {
+    const apiStatus = getElement('api-status');
+    const apiMessage = getElement('api-message');
+    
+    if (apiStatus) {
+      apiStatus.textContent = 'Checking...';
+      apiStatus.className = 'api-status checking';
+    }
+    
+    if (apiMessage) {
+      apiMessage.textContent = 'Testing connection to the API...';
+      apiMessage.className = 'api-message';
+    }
+    
+    logDebug('Testing API connection...');
+    
+    // Get API URL from storage
+    loadFromStorage({ 'apiUrl': 'http://localhost:5000' }, function(data) {
+      const apiUrl = data.apiUrl;
+      
+      // Make a request to the health endpoint
+      fetch(`${apiUrl}/health`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json'
+        }
+      })
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then(data => {
+        logDebug('API health check response: ' + JSON.stringify(data));
+        
+        if (apiStatus) {
+          apiStatus.textContent = 'Connected';
+          apiStatus.className = 'api-status connected';
+        }
+        
+        if (apiMessage) {
+          apiMessage.textContent = `Successfully connected to API. ${data.models ? `Available models: ${Object.keys(data.models).join(', ')}` : ''}`;
+          apiMessage.className = 'api-message success';
+        }
+        
+        // Update model selector if we have model status
+        if (data.models) {
+          updateModelSelector(data.models);
+        }
+      })
+      .catch(error => {
+        console.error('API connection error:', error);
+        logDebug(`API connection error: ${error.message}`);
+        
+        if (apiStatus) {
+          apiStatus.textContent = 'Disconnected';
+          apiStatus.className = 'api-status disconnected';
+        }
+        
+        if (apiMessage) {
+          apiMessage.textContent = `Could not connect to API: ${error.message}. You can still use the simple offline model.`;
+          apiMessage.className = 'api-message error';
+        }
+        
+        // Update model selector to only show offline model
+        updateModelSelector({ simple: true });
       });
+    });
+  }
+  
+  // Update model selector based on available models
+  function updateModelSelector(modelsStatus) {
+    const modelSelector = getElement('model-selector');
+    if (!modelSelector) {
+      console.error('Model selector element not found');
+      return;
     }
     
-    // Reset result display
-    function resetResultDisplay() {
-      const sentimentLabel = getElement('sentiment-label');
-      const sentimentEmoji = getElement('sentiment-emoji');
-      const confidenceBar = getElement('confidence-bar');
-      const summaryText = getElement('summary-text');
-      
-      if (sentimentLabel) {
-        sentimentLabel.textContent = '';
-        sentimentLabel.className = 'sentiment-label';
-      }
-      
-      if (sentimentEmoji) {
-        sentimentEmoji.textContent = '';
-      }
-      
-      if (confidenceBar) {
-        confidenceBar.style.width = '0%';
-      }
-      
-      if (summaryText) {
-        summaryText.textContent = '';
+    // Save current selection
+    const currentSelection = modelSelector.value;
+    
+    // Clear existing options
+    modelSelector.innerHTML = '';
+    
+    // Add available models
+    if (modelsStatus.ensemble) {
+      addModelOption(modelSelector, 'ensemble', 'Ensemble Model (Best Overall)');
+    }
+    
+    if (modelsStatus.attention) {
+      addModelOption(modelSelector, 'attention', 'Attention Model (Detail Focused)');
+    }
+    
+    if (modelsStatus.neutral) {
+      addModelOption(modelSelector, 'neutral', 'Neutral Model (Balanced)');
+    }
+    
+    if (modelsStatus.advanced) {
+      addModelOption(modelSelector, 'advanced', 'Advanced Model (Most Accurate)');
+    }
+    
+    // Always add simple option for offline use
+    addModelOption(modelSelector, 'simple', 'Simple Model (Offline Mode - Always Available)');
+    
+    // Try to restore previous selection
+    let selected = false;
+    for (let i = 0; i < modelSelector.options.length; i++) {
+      if (modelSelector.options[i].value === currentSelection) {
+        modelSelector.selectedIndex = i;
+        selected = true;
+        break;
       }
     }
     
-    // Update result display with sentiment analysis result
-    function updateResultDisplay(result) {
-      const sentimentLabel = getElement('sentiment-label');
-      const sentimentEmoji = getElement('sentiment-emoji');
-      const confidenceBar = getElement('confidence-bar');
-      
-      if (!sentimentLabel || !sentimentEmoji || !confidenceBar) {
-        console.error('Missing elements for displaying results');
-        return;
-      }
-      
-      let sentiment = '';
-      let emoji = '';
-      let labelClass = '';
-      
-      // Determine sentiment class and emoji
-      if (result.category === 0 || result.label === 'negative') {
-        sentiment = 'Negative';
-        emoji = '😞';
-        labelClass = 'negative';
-      } else if (result.category === 2 || result.label === 'positive') {
-        sentiment = 'Positive';
-        emoji = '😊';
-        labelClass = 'positive';
+    // Default to best available model if previous selection not available
+    if (!selected) {
+      if (modelsStatus.ensemble) {
+        modelSelector.value = 'ensemble';
+      } else if (modelsStatus.attention) {
+        modelSelector.value = 'attention';
+      } else if (modelsStatus.advanced) {
+        modelSelector.value = 'advanced';
+      } else if (modelsStatus.neutral) {
+        modelSelector.value = 'neutral';
       } else {
-        sentiment = 'Neutral';
-        emoji = '😐';
-        labelClass = 'neutral';
+        modelSelector.value = 'simple';
+      }
+    }
+    
+    // Save the selected model
+    saveToStorage({ selectedModel: modelSelector.value });
+    logDebug(`Model set to: ${modelSelector.value}`);
+  }
+  
+  // Helper to add option to model selector
+  function addModelOption(selector, value, text) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = text;
+    selector.appendChild(option);
+  }
+  
+  // Perform sentiment analysis
+  function performAnalysis() {
+    const textInput = getElement('text-input');
+    if (!textInput || !textInput.value.trim()) {
+      alert('Please enter some text to analyze');
+      return;
+    }
+    
+    const text = textInput.value.trim();
+    const modelSelector = getElement('model-selector');
+    const modelType = modelSelector ? modelSelector.value : 'simple';
+    
+    logDebug(`Analyzing text with model: ${modelType}`);
+    
+    // Clear previous results
+    resetResultDisplay();
+    
+    // Show loading state
+    const sentimentLabel = getElement('sentiment-label');
+    if (sentimentLabel) {
+      sentimentLabel.textContent = 'Analyzing...';
+      sentimentLabel.className = 'sentiment-label loading';
+    }
+    
+    // If using simple model, process locally
+    if (modelType === 'simple') {
+      logDebug('Using simple offline model');
+      // Local processing without API
+      const result = processLocalSentiment(text);
+      
+      // Generate a simple summary
+      result.summary = generateSimpleSummary(text, result);
+      
+      // Update results display
+      updateResultDisplay(result);
+      
+      // Save to history
+      saveAnalysisToHistory(text, result);
+    } else {
+      // Get API URL from storage
+      loadFromStorage({ 'apiUrl': 'http://localhost:5000' }, function(data) {
+        const apiUrl = data.apiUrl;
+        
+        logDebug(`Sending request to API at ${apiUrl}`);
+        
+        // Make API request
+        fetch(`${apiUrl}/analyze`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            text: text,
+            model: modelType,
+            include_summary: true
+          })
+        })
+        .then(response => {
+          if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+          }
+          return response.json();
+        })
+        .then(result => {
+          logDebug('API response received');
+          
+          // Update results display
+          updateResultDisplay(result);
+          
+          // Save to history
+          saveAnalysisToHistory(text, result);
+        })
+        .catch(error => {
+          console.error('API error:', error);
+          logDebug(`API error: ${error.message}`);
+          
+          // Fallback to simple model on error
+          const result = processLocalSentiment(text);
+          result.summary = generateSimpleSummary(text, result);
+          result.error = error.message;
+          
+          // Update results display
+          updateResultDisplay(result);
+          
+          // Show error message
+          const summaryText = getElement('summary-text');
+          if (summaryText) {
+            summaryText.innerHTML = `<div class="api-error">Error contacting API: ${error.message}. Using simple offline model instead.</div>` + summaryText.innerHTML;
+          }
+          
+          // Save to history
+          saveAnalysisToHistory(text, result);
+        });
+      });
+    }
+  }
+  
+  // Reset result display
+  function resetResultDisplay() {
+    const sentimentLabel = getElement('sentiment-label');
+    const summaryText = getElement('summary-text');
+    const sentimentScore = getElement('sentiment-score');
+    
+    if (sentimentScore) {
+      sentimentScore.textContent = '-';
+    }
+    
+    if (sentimentLabel) {
+      sentimentLabel.textContent = 'Analyzing...';
+      sentimentLabel.className = 'sentiment-label';
+    }
+    
+    if (summaryText) {
+      summaryText.textContent = 'Generating summary...';
+    }
+    
+    // Reset sentiment bars
+    const negativeBar = getElement('negative-bar');
+    const neutralBar = getElement('neutral-bar');
+    const positiveBar = getElement('positive-bar');
+    
+    if (negativeBar) negativeBar.style.width = '0%';
+    if (neutralBar) neutralBar.style.width = '0%';
+    if (positiveBar) positiveBar.style.width = '0%';
+    
+    const negativeValue = getElement('negative-value');
+    const neutralValue = getElement('neutral-value');
+    const positiveValue = getElement('positive-value');
+    
+    if (negativeValue) negativeValue.textContent = '0%';
+    if (neutralValue) neutralValue.textContent = '0%';
+    if (positiveValue) positiveValue.textContent = '0%';
+  }
+  
+  // Update result display with sentiment analysis
+  function updateResultDisplay(result) {
+    logDebug('Updating display with result');
+    
+    const sentimentLabel = getElement('sentiment-label');
+    const summaryText = getElement('summary-text');
+    const sentimentScore = getElement('sentiment-score');
+    const sentimentEmoji = getElement('sentiment-emoji');
+    const sentimentCircle = document.querySelector('.sentiment-circle');
+    
+    // Normalize result format
+    const normalizedResult = {
+      score: result.score !== undefined ? result.score : 0,
+      category: result.category !== undefined ? result.category : 1,
+      label: result.label || 'neutral',
+      confidence: result.confidence || 0.5,
+      summary: result.summary || null,
+      model_used: result.model_used || 'unknown',
+      summarization_method: result.summarization_method
+    };
+    
+    // Update sentiment circle
+    if (sentimentCircle) {
+      // Remove previous classes
+      sentimentCircle.classList.remove('negative', 'neutral', 'positive');
+      
+      // Add appropriate class
+      if (normalizedResult.category === 0 || normalizedResult.label === 'negative') {
+        sentimentCircle.classList.add('negative');
+      } else if (normalizedResult.category === 2 || normalizedResult.label === 'positive') {
+        sentimentCircle.classList.add('positive');
+      } else {
+        sentimentCircle.classList.add('neutral');
+      }
+    }
+    
+    // Update sentiment score (hidden but still updated for reference)
+    if (sentimentScore) {
+      sentimentScore.textContent = normalizedResult.score.toFixed(2);
+    }
+    
+    // Update sentiment emoji based on score/category
+    if (sentimentEmoji) {
+      let emoji = '😐'; // Default neutral emoji
+      
+      if (normalizedResult.category === 0 || normalizedResult.label === 'negative') {
+        // Select negative emoji based on score intensity
+        const score = normalizedResult.score;
+        if (score < -0.7) {
+          emoji = '😡'; // Very negative
+        } else if (score < -0.4) {
+          emoji = '😟'; // Moderately negative
+        } else {
+          emoji = '🙁'; // Slightly negative
+        }
+      } else if (normalizedResult.category === 2 || normalizedResult.label === 'positive') {
+        // Select positive emoji based on score intensity
+        const score = normalizedResult.score;
+        if (score > 0.7) {
+          emoji = '😄'; // Very positive
+        } else if (score > 0.4) {
+          emoji = '😊'; // Moderately positive
+        } else {
+          emoji = '🙂'; // Slightly positive
+        }
       }
       
-      // Update the display
+      sentimentEmoji.textContent = emoji;
+    }
+    
+    // Update sentiment label
+    if (sentimentLabel) {
+      // Determine sentiment text
+      let sentiment = 'Neutral';
+      let labelClass = 'neutral';
+      
+      if (normalizedResult.category === 0 || normalizedResult.label === 'negative') {
+        sentiment = 'Negative';
+        labelClass = 'negative';
+      } else if (normalizedResult.category === 2 || normalizedResult.label === 'positive') {
+        sentiment = 'Positive';
+        labelClass = 'positive';
+      }
+      
       sentimentLabel.textContent = sentiment;
       sentimentLabel.className = `sentiment-label ${labelClass}`;
-      sentimentEmoji.textContent = emoji;
-      
-      // Update confidence bar
-      const confidence = result.confidence || 0.5;
-      confidenceBar.style.width = `${confidence * 100}%`;
-      confidenceBar.className = `confidence-bar ${labelClass}`;
-      
-      // Show model loading time if applicable
-      if (result.modelWasJustLoaded && result.loadingTimeSeconds) {
-        logToDebug(`Model was just loaded in ${result.loadingTimeSeconds.toFixed(2)} seconds`);
-      }
-      
-      // Show any additional emotion data if available
-      if (result.emotions && Object.keys(result.emotions).length > 0) {
-        const emotionsDisplay = getElement('emotions-display');
-        if (emotionsDisplay) {
-          emotionsDisplay.innerHTML = '';
-          emotionsDisplay.style.display = 'block';
-          
-          for (const [emotion, score] of Object.entries(result.emotions)) {
-            const emotionElement = document.createElement('div');
-            emotionElement.className = 'emotion-item';
-            emotionElement.innerHTML = `
-              <span class="emotion-name">${emotion}:</span>
-              <div class="emotion-bar-container">
-                <div class="emotion-bar" style="width: ${score * 100}%"></div>
-              </div>
-              <span class="emotion-score">${(score * 100).toFixed(0)}%</span>
-            `;
-            emotionsDisplay.appendChild(emotionElement);
-          }
-        }
-      }
     }
     
-    // Save sentiment analysis to history
-    function saveAnalysisToHistory(text, result) {
-      // Only save if we have actual text and a result
-      if (!text || !result) return;
-      
-      // Get existing history
-      safeStorageGet({ 'analysisHistory': [] }, (data) => {
-        let history = data.analysisHistory || [];
-        
-        // Add new entry
-        history.unshift({
-          text: text,
-          result: result,
-          timestamp: Date.now()
-        });
-        
-        // Keep only the last 50 entries
-        if (history.length > 50) {
-          history = history.slice(0, 50);
-        }
-        
-        // Save updated history
-        safeStorageSet({ 'analysisHistory': history }, () => {
-          console.log('Updated analysis history');
-        });
-      });
-    }
+    // Update sentiment bars
+    updateSentimentBars(normalizedResult);
     
-    // Initialize history tab
-    function initializeHistoryTab() {
-      const historyContainer = getElement('history-container');
-      if (!historyContainer) return;
-      
-      // Clear existing history
-      historyContainer.innerHTML = '';
-      
-      // Get history from storage
-      safeStorageGet({ 'analysisHistory': [] }, (data) => {
-        const history = data.analysisHistory || [];
-        
-        if (history.length === 0) {
-          historyContainer.innerHTML = '<div class="no-history">No analysis history yet.</div>';
-          return;
-        }
-        
-        // Create elements for each history entry
-        history.forEach((entry, index) => {
-          const historyItem = document.createElement('div');
-          historyItem.className = 'history-item';
-          
-          // Determine sentiment class
-          let sentimentClass = 'neutral';
-          if (entry.result.category === 0 || entry.result.label === 'negative') {
-            sentimentClass = 'negative';
-          } else if (entry.result.category === 2 || entry.result.label === 'positive') {
-            sentimentClass = 'positive';
-          }
-          
-          // Format timestamp
-          const date = new Date(entry.timestamp);
-          const formattedDate = `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
-          
-          // Create HTML for history item
-          historyItem.innerHTML = `
-            <div class="history-header">
-              <span class="history-date">${formattedDate}</span>
-              <span class="history-sentiment ${sentimentClass}">${entry.result.label}</span>
-            </div>
-            <div class="history-text">${entry.text.substring(0, 100)}${entry.text.length > 100 ? '...' : ''}</div>
-            ${entry.result.summary ? `<div class="history-summary">Summary: ${entry.result.summary}</div>` : ''}
-            <div class="history-actions">
-              <button class="history-analyze-again" data-index="${index}">Analyze Again</button>
-              <button class="history-remove" data-index="${index}">Remove</button>
-            </div>
-          `;
-          
-          historyContainer.appendChild(historyItem);
-        });
-        
-        // Add event listeners for history actions
-        const analyzeAgainButtons = document.querySelectorAll('.history-analyze-again');
-        const removeButtons = document.querySelectorAll('.history-remove');
-        
-        analyzeAgainButtons.forEach(button => {
-          button.addEventListener('click', () => {
-            const index = parseInt(button.getAttribute('data-index'));
-            const entry = history[index];
-            
-            // Switch to analyze tab
-            const analyzeBtn = document.querySelector('.tab-btn[data-tab="analyze"]');
-            if (analyzeBtn) {
-              analyzeBtn.click();
-            }
-            
-            // Fill text input with historical text
-            const textInput = getElement('text-input');
-            if (textInput && entry.text) {
-              textInput.value = entry.text;
-              
-              // Trigger analysis
-              const analyzeButton = getElement('analyze-button');
-              if (analyzeButton) {
-                analyzeButton.click();
-              }
-            }
-          });
-        });
-        
-        removeButtons.forEach(button => {
-          button.addEventListener('click', () => {
-            const index = parseInt(button.getAttribute('data-index'));
-            
-            // Remove entry from history
-            history.splice(index, 1);
-            
-            // Save updated history
-            safeStorageSet({ 'analysisHistory': history }, () => {
-              // Refresh history display
-              initializeHistoryTab();
-            });
-          });
-        });
-      });
-    }
-    
-    // Initialize visualization tab
-    function initializeVisualizationTab() {
-      console.log('Visualization tab initialized');
-      
-      // This will be implemented in a future update
-      const visualizationContainer = getElement('visualization-container');
-      if (visualizationContainer) {
-        visualizationContainer.innerHTML = '<div class="coming-soon">Mood visualization coming soon!</div>';
-      }
-    }
-    
-    // Start initialization
-    try {
-      initializeUI();
-      logToDebug('MoodMap Extension initialized successfully');
-    } catch (error) {
-      console.error('Error initializing MoodMap:', error);
-      logToDebug(`Initialization error: ${error.message}`);
-      
-      // Check for extension context invalidation
-      if (error.message.includes("Extension context invalidated")) {
-        handleExtensionContextInvalidated();
-        return;
+    // Update summary text
+    if (summaryText) {
+      if (normalizedResult.summary) {
+        summaryText.textContent = normalizedResult.summary;
+      } else {
+        summaryText.textContent = 'No summary available for this text.';
       }
       
-      // Show error in the UI
-      if (summaryText) {
-        summaryText.textContent = `Error initializing extension: ${error.message}`;
+      // Format the model information to show both sentiment and summarization clearly
+      let modelInfo = normalizedResult.model_used;
+      
+      // Check if we have both sentiment model and BART summarizer
+      if (normalizedResult.summarization_method === 'bart' && 
+          !normalizedResult.model_used.includes('BART') && 
+          !normalizedResult.model_used.includes('bart')) {
+        modelInfo = `${normalizedResult.model_used} + BART summarizer`;
+      }
+      
+      // Add model information
+      const modelInfoElement = document.createElement('div');
+      modelInfoElement.className = 'model-info';
+      modelInfoElement.textContent = `Analyzed using: ${modelInfo}`;
+      summaryText.appendChild(modelInfoElement);
+      
+      // Add error information if applicable
+      if (result.error) {
+        const errorInfo = document.createElement('div');
+        errorInfo.className = 'error-info';
+        errorInfo.textContent = `Note: ${result.error}`;
+        summaryText.appendChild(errorInfo);
+      }
+      
+      // If model fallback happened, add explanation
+      if (result.fallback_to && result.fallback_to !== "none") {
+        const fallbackInfo = document.createElement('div');
+        fallbackInfo.className = 'fallback-info';
+        fallbackInfo.textContent = `Note: Advanced model was not available, used ${result.fallback_to} model instead.`;
+        summaryText.appendChild(fallbackInfo);
       }
     }
   }
+  
+  // Update sentiment bars
+  function updateSentimentBars(result) {
+    // Convert to bar percentages
+    let negativeValue = 0;
+    let neutralValue = 0;
+    let positiveValue = 0;
+    
+    // Map category to bar values
+    if (result.category === 0 || result.label === 'negative') {
+      negativeValue = 70;
+      neutralValue = 20;
+      positiveValue = 10;
+    } else if (result.category === 2 || result.label === 'positive') {
+      negativeValue = 10;
+      neutralValue = 20;
+      positiveValue = 70;
+    } else {
+      negativeValue = 20;
+      neutralValue = 60;
+      positiveValue = 20;
+    }
+    
+    // Fine-tune with confidence if available
+    if (result.confidence) {
+      const confidence = result.confidence;
+      
+      if (result.category === 0 || result.label === 'negative') {
+        negativeValue = Math.min(90, negativeValue + (confidence * 20));
+        neutralValue = Math.max(5, neutralValue - (confidence * 10));
+        positiveValue = Math.max(5, positiveValue - (confidence * 10));
+      } else if (result.category === 2 || result.label === 'positive') {
+        positiveValue = Math.min(90, positiveValue + (confidence * 20));
+        neutralValue = Math.max(5, neutralValue - (confidence * 10));
+        negativeValue = Math.max(5, negativeValue - (confidence * 10));
+      } else {
+        neutralValue = Math.min(80, neutralValue + (confidence * 20));
+        negativeValue = Math.max(10, negativeValue - (confidence * 10));
+        positiveValue = Math.max(10, positiveValue - (confidence * 10));
+      }
+    }
+    
+    // Score-based adjustments
+    if (result.score !== undefined) {
+      const score = result.score;
+      
+      if (score < 0) {
+        // Negative score - increase negative bar
+        const adjustment = Math.abs(score) * 30;
+        negativeValue += adjustment;
+        neutralValue = Math.max(5, neutralValue - adjustment / 2);
+        positiveValue = Math.max(5, positiveValue - adjustment / 2);
+      } else if (score > 0) {
+        // Positive score - increase positive bar
+        const adjustment = score * 30;
+        positiveValue += adjustment;
+        neutralValue = Math.max(5, neutralValue - adjustment / 2);
+        negativeValue = Math.max(5, negativeValue - adjustment / 2);
+      }
+      
+      // Normalize percentages to add up to 100%
+      const total = negativeValue + neutralValue + positiveValue;
+      negativeValue = Math.round((negativeValue / total) * 100);
+      neutralValue = Math.round((neutralValue / total) * 100);
+      positiveValue = Math.round((positiveValue / total) * 100);
+      
+      // Ensure they add up to exactly 100%
+      const diff = 100 - (negativeValue + neutralValue + positiveValue);
+      neutralValue += diff;
+    }
+    
+    // Update the bars
+    const negativeBar = getElement('negative-bar');
+    const neutralBar = getElement('neutral-bar');
+    const positiveBar = getElement('positive-bar');
+    
+    if (negativeBar) negativeBar.style.width = `${negativeValue}%`;
+    if (neutralBar) neutralBar.style.width = `${neutralValue}%`;
+    if (positiveBar) positiveBar.style.width = `${positiveValue}%`;
+    
+    // Update the values
+    const negativeValue_el = getElement('negative-value');
+    const neutralValue_el = getElement('neutral-value');
+    const positiveValue_el = getElement('positive-value');
+    
+    if (negativeValue_el) negativeValue_el.textContent = `${negativeValue}%`;
+    if (neutralValue_el) neutralValue_el.textContent = `${neutralValue}%`;
+    if (positiveValue_el) positiveValue_el.textContent = `${positiveValue}%`;
+  }
+  
+  // Improved offline sentiment analysis with contextual awareness
+  function processLocalSentiment(text) {
+    if (!text || text.trim().length === 0) {
+      return {
+        category: "neutral",
+        score: 0.5,
+        confidence: 0,
+        summary: "No text to analyze.",
+        details: {
+          sentiment_trend: "consistent",
+          sentiment_shift: false,
+          has_questions: false,
+          section_sentiments: []
+        }
+      };
+    }
+    
+    // Simple positive and negative word lists for basic sentiment detection
+    const positiveWords = [
+      "good", "great", "excellent", "awesome", "happy", "love", "like", "best", 
+      "positive", "wonderful", "enjoy", "nice", "fantastic", "amazing", "perfect",
+      "excited", "glad", "pleased", "grateful", "satisfied", "enthusiastic"
+    ];
+    
+    const negativeWords = [
+      "bad", "terrible", "awful", "hate", "dislike", "worst", "negative", "poor", 
+      "horrible", "unfortunate", "sad", "angry", "upset", "disappoint", "frustrat",
+      "annoyed", "worried", "sorry", "unhappy", "regret", "depressed", "concerned"
+    ];
+    
+    // Split text into sections for trend analysis
+    const sentences = text.match(/[^\.!\?]+[\.!\?]+/g) || [text];
+    const sectionCount = Math.min(3, Math.ceil(sentences.length / 3));
+    const sectionsLength = Math.ceil(sentences.length / sectionCount);
+    
+    const sections = [];
+    for (let i = 0; i < sectionCount; i++) {
+      const start = i * sectionsLength;
+      const end = Math.min(start + sectionsLength, sentences.length);
+      const sectionText = sentences.slice(start, end).join(" ");
+      sections.push(sectionText);
+    }
+    
+    // Analyze each section
+    const sectionSentiments = sections.map(section => {
+      return analyzeTextSentiment(section, positiveWords, negativeWords);
+    });
+    
+    // Detect sentiment trend
+    let sentimentTrend = "consistent";
+    if (sectionSentiments.length > 1) {
+      const firstScore = sectionSentiments[0].score;
+      const lastScore = sectionSentiments[sectionSentiments.length - 1].score;
+      
+      if (lastScore - firstScore > 0.15) {
+        sentimentTrend = "improving";
+      } else if (firstScore - lastScore > 0.15) {
+        sentimentTrend = "worsening";
+      }
+    }
+    
+    // Detect sentiment shifts
+    let sentimentShift = false;
+    for (let i = 1; i < sectionSentiments.length; i++) {
+      const prevScore = sectionSentiments[i-1].score;
+      const currScore = sectionSentiments[i].score;
+      if (Math.abs(currScore - prevScore) > 0.25) {
+        sentimentShift = true;
+        break;
+      }
+    }
+    
+    // Check for questions that might indicate different context
+    const hasQuestions = text.includes("?");
+    
+    // Calculate overall sentiment
+    const overallSentiment = analyzeTextSentiment(text, positiveWords, negativeWords);
+    
+    // Generate confidence based on sentiment strength and text length
+    const confidence = calculateConfidence(overallSentiment.score, text.length, sentimentShift);
+    
+    // Create the result object with enhanced contextual details
+    const result = {
+      category: overallSentiment.category,
+      score: overallSentiment.score,
+      confidence: confidence,
+      details: {
+        sentiment_trend: sentimentTrend,
+        sentiment_shift: sentimentShift,
+        has_questions: hasQuestions,
+        section_sentiments: sectionSentiments.map(s => s.category)
+      }
+    };
+    
+    // Generate context-aware summary
+    result.summary = generateSimpleSummary(text, result);
+    
+    return result;
+  }
+  
+  // Helper function to analyze sentiment of a text segment
+  function analyzeTextSentiment(text, positiveWords, negativeWords) {
+    text = text.toLowerCase();
+    let positiveCount = 0;
+    let negativeCount = 0;
+    
+    // Count positive words with consideration for negations
+    positiveWords.forEach(word => {
+      const regex = new RegExp("\\b" + word + "\\b", "gi");
+      const matches = text.match(regex);
+      if (matches) {
+        positiveCount += matches.length;
+        
+        // Check for negations before positive words
+        matches.forEach(() => {
+          const negationRegex = new RegExp(`\\b(not|no|never|don't|doesn't|isn't|aren't|wasn't|weren't)\\s+[\\w\\s]{0,10}\\b${word}\\b`, 'gi');
+          const negatedMatches = text.match(negationRegex);
+          if (negatedMatches) {
+            positiveCount -= negatedMatches.length;
+            negativeCount += negatedMatches.length;
+          }
+        });
+      }
+    });
+    
+    // Count negative words with consideration for negations
+    negativeWords.forEach(word => {
+      const regex = new RegExp("\\b" + word + "\\b", "gi");
+      const matches = text.match(regex);
+      if (matches) {
+        negativeCount += matches.length;
+        
+        // Check for negations before negative words
+        matches.forEach(() => {
+          const negationRegex = new RegExp(`\\b(not|no|never|don't|doesn't|isn't|aren't|wasn't|weren't)\\s+[\\w\\s]{0,10}\\b${word}\\b`, 'gi');
+          const negatedMatches = text.match(negationRegex);
+          if (negatedMatches) {
+            negativeCount -= negatedMatches.length;
+            positiveCount += negatedMatches.length;
+          }
+        });
+      }
+    });
+    
+    // Calculate sentiment score (0 to 1, where 0 is very negative, 1 is very positive)
+    let score = 0.5; // Neutral by default
+    const total = positiveCount + negativeCount;
+    
+    if (total > 0) {
+      score = 0.5 + (positiveCount - negativeCount) / (2 * total);
+      // Ensure score is within bounds
+      score = Math.max(0, Math.min(1, score));
+    }
+    
+    // Determine sentiment category
+    let category = "neutral";
+    if (score > 0.6) category = "positive";
+    if (score < 0.4) category = "negative";
+    
+    return { category, score };
+  }
+  
+  // Helper function to calculate confidence level
+  function calculateConfidence(score, textLength, hasSentimentShift) {
+    // Base confidence on how far score is from neutral (0.5)
+    let confidence = Math.abs(score - 0.5) * 2; // 0 to 1 scale
+    
+    // Adjust confidence based on text length
+    if (textLength < 20) {
+      confidence *= 0.7; // Shorter texts have lower confidence
+    } else if (textLength > 200) {
+      confidence *= 0.85; // Longer texts have moderate confidence
+    }
+    
+    // Reduce confidence if there are sentiment shifts
+    if (hasSentimentShift) {
+      confidence *= 0.8;
+    }
+    
+    return Math.min(0.95, confidence); // Cap at 0.95 for offline mode
+  }
+  
+  // Enhanced contextual summary generation for offline mode
+  function generateSimpleSummary(text, sentimentResult) {
+    if (!text || text.trim().length === 0) {
+      return "No text provided to analyze.";
+    }
+    
+    // Get basic text statistics
+    const wordCount = text.split(/\s+/).filter(word => word.length > 0).length;
+    const sentences = text.match(/[^\.!\?]+[\.!\?]+/g) || [text];
+    const sentenceCount = sentences.length;
+    
+    // Extract key phrases (simple method for offline mode)
+    const keyPhrases = extractKeyPhrases(text);
+    
+    // Build contextual summary
+    let summary = `Analyzed text containing ${wordCount} words in ${sentenceCount} sentences. `;
+    
+    // Add sentiment context based on detailed analysis
+    const { sentiment_trend, sentiment_shift, has_questions, section_sentiments } = sentimentResult.details;
+    
+    // Add sentiment trend information
+    if (sentiment_trend === "improving") {
+      summary += "The sentiment appears to improve throughout the text. ";
+    } else if (sentiment_trend === "worsening") {
+      summary += "The sentiment tends to become more negative as the text progresses. ";
+    } else {
+      summary += "The sentiment remains relatively consistent throughout the text. ";
+    }
+    
+    // Add information about sentiment shifts if present
+    if (sentiment_shift) {
+      summary += "There are notable shifts in sentiment within the text. ";
+    }
+    
+    // Add context about questions if present
+    if (has_questions) {
+      summary += "The text contains questions, suggesting an inquisitive tone. ";
+    }
+    
+    // Add key phrases from the text
+    if (keyPhrases.length > 0) {
+      summary += `Key phrases identified: ${keyPhrases.slice(0, 3).join(", ")}`;
+      if (keyPhrases.length > 3) {
+        summary += ", and others";
+      }
+      summary += ". ";
+    }
+    
+    // Add sentence excerpts based on sentiment
+    if (sentimentResult.category === "positive") {
+      const positiveSentences = findMostPositiveSentences(sentences, 1);
+      if (positiveSentences.length > 0) {
+        summary += `Notable positive excerpt: "${positiveSentences[0]}" `;
+      }
+    } else if (sentimentResult.category === "negative") {
+      const negativeSentences = findMostNegativeSentences(sentences, 1);
+      if (negativeSentences.length > 0) {
+        summary += `Notable negative excerpt: "${negativeSentences[0]}" `;
+      }
+    }
+    
+    // Add confidence context
+    if (sentimentResult.confidence < 0.4) {
+      summary += "Note: The sentiment analysis has low confidence due to mixed or ambiguous language.";
+    }
+    
+    return summary;
+  }
+  
+  // Helper function to extract key phrases (simple version for offline mode)
+  function extractKeyPhrases(text) {
+    const words = text.toLowerCase().split(/\s+/);
+    const stopWords = ["the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "with", 
+                      "by", "about", "as", "of", "from", "is", "are", "was", "were", "be", "been",
+                      "being", "have", "has", "had", "do", "does", "did", "will", "would", "shall",
+                      "should", "can", "could", "may", "might", "must", "i", "you", "he", "she", 
+                      "it", "we", "they", "me", "him", "her", "us", "them", "this", "that", "these",
+                      "those", "my", "your", "his", "her", "its", "our", "their"];
+    
+    // Remove stopwords and short words
+    const filteredWords = words.filter(word => 
+      !stopWords.includes(word) && 
+      word.length > 3 &&
+      !/^\d+$/.test(word) // Exclude numbers
+    );
+    
+    // Count word frequencies
+    const wordFrequency = {};
+    filteredWords.forEach(word => {
+      wordFrequency[word] = (wordFrequency[word] || 0) + 1;
+    });
+    
+    // Extract 2-gram phrases
+    const phrases = [];
+    for (let i = 0; i < words.length - 1; i++) {
+      if (!stopWords.includes(words[i]) && !stopWords.includes(words[i+1])) {
+        const phrase = words[i] + " " + words[i+1];
+        phrases.push(phrase);
+      }
+    }
+    
+    // Sort words by frequency
+    const sortedWords = Object.entries(wordFrequency)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(entry => entry[0]);
+    
+    // Combine single words and phrases
+    return [...sortedWords, ...phrases.slice(0, 2)].slice(0, 5);
+  }
+  
+  // Helper function to find the most positive sentences
+  function findMostPositiveSentences(sentences, count) {
+    // Simple heuristic for finding positive sentences
+    const positiveWords = [
+      "good", "great", "excellent", "awesome", "happy", "love", "like", "best", 
+      "positive", "wonderful", "enjoy", "nice", "fantastic", "amazing", "perfect"
+    ];
+    
+    // Score sentences based on positive word count
+    const scoredSentences = sentences.map(sentence => {
+      const lowerSentence = sentence.toLowerCase();
+      let score = 0;
+      positiveWords.forEach(word => {
+        const regex = new RegExp("\\b" + word + "\\b", "gi");
+        const matches = lowerSentence.match(regex);
+        if (matches) score += matches.length;
+      });
+      return { sentence, score };
+    });
+    
+    // Sort by score and get the top sentences
+    return scoredSentences
+      .sort((a, b) => b.score - a.score)
+      .slice(0, count)
+      .map(item => item.sentence.trim());
+  }
+  
+  // Helper function to find the most negative sentences
+  function findMostNegativeSentences(sentences, count) {
+    // Simple heuristic for finding negative sentences
+    const negativeWords = [
+      "bad", "terrible", "awful", "hate", "dislike", "worst", "negative", "poor", 
+      "horrible", "unfortunate", "sad", "angry", "upset", "disappoint", "frustrat"
+    ];
+    
+    // Score sentences based on negative word count
+    const scoredSentences = sentences.map(sentence => {
+      const lowerSentence = sentence.toLowerCase();
+      let score = 0;
+      negativeWords.forEach(word => {
+        const regex = new RegExp("\\b" + word + "\\b", "gi");
+        const matches = lowerSentence.match(regex);
+        if (matches) score += matches.length;
+      });
+      return { sentence, score };
+    });
+    
+    // Sort by score and get the top sentences
+    return scoredSentences
+      .sort((a, b) => b.score - a.score)
+      .slice(0, count)
+      .map(item => item.sentence.trim());
+  }
+  
+  // Save analysis to history
+  function saveAnalysisToHistory(text, result) {
+    // Only save if we have actual text and a result
+    if (!text || !result) {
+      console.error('Cannot save to history - missing text or result');
+      return;
+    }
+    
+    // Get existing history
+    loadFromStorage({ 'analysisHistory': [] }, (data) => {
+      const history = data.analysisHistory || [];
+      
+      // Create history item
+      const historyItem = {
+        text: text,
+        timestamp: Date.now(),
+        score: result.score,
+        category: result.category,
+        label: result.label,
+        confidence: result.confidence,
+        model_used: result.model_used
+      };
+      
+      // Add to history
+      history.push(historyItem);
+      
+      // Limit history size to 100 items
+      if (history.length > 100) {
+        history.sort((a, b) => b.timestamp - a.timestamp);
+        history.length = 100;
+      }
+      
+      // Save updated history
+      saveToStorage({ 'analysisHistory': history }, function(success) {
+        if (success) {
+          logDebug('Analysis saved to history');
+        } else {
+          logDebug('Failed to save analysis to history');
+        }
+      });
+    });
+  }
+  
+  // Storage helper functions
+  function loadFromStorage(defaults, callback) {
+    try {
+      chrome.storage.local.get(defaults, (result) => {
+        callback(result);
+      });
+    } catch (error) {
+      console.error('Storage load error:', error);
+      logDebug(`Storage load error: ${error.message}`);
+      callback(defaults);
+    }
+  }
+  
+  function saveToStorage(items, callback) {
+    try {
+      chrome.storage.local.set(items, () => {
+        if (chrome.runtime.lastError) {
+          console.error('Storage save error:', chrome.runtime.lastError);
+          logDebug(`Storage save error: ${chrome.runtime.lastError.message}`);
+          if (callback) callback(false);
+          return;
+        }
+        if (callback) callback(true);
+      });
+    } catch (error) {
+      console.error('Storage save error:', error);
+      logDebug(`Storage save error: ${error.message}`);
+      if (callback) callback(false);
+    }
+  }
 });
+

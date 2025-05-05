@@ -429,6 +429,7 @@ async function analyzeWithSummary(text, options = {}) {
       // Add a simple placeholder for summary
       sentimentResult.summary = "Summary unavailable (API is offline)";
       sentimentResult.summarization_method = "none";
+      sentimentResult.model_used = "simple_rule_based";
       
       return sentimentResult;
     }
@@ -448,7 +449,9 @@ async function analyzeWithSummary(text, options = {}) {
       },
       body: JSON.stringify({
         text: text,
-        model_type: preferAdvancedModel ? 'advanced' : modelToUse
+        model_type: preferAdvancedModel ? 'advanced' : modelToUse,
+        // Add a flag to inform the API that we're okay with model fallback
+        fallback_to_available: true
       })
     });
     
@@ -458,6 +461,20 @@ async function analyzeWithSummary(text, options = {}) {
     
     const result = await response.json();
     console.log("API returned combined result:", result);
+    
+    // Ensure we have a model_used field to display to the user
+    if (!result.model_used) {
+      if (result.fallback_to && result.fallback_to !== "none") {
+        result.model_used = result.fallback_to;
+      } else {
+        result.model_used = preferAdvancedModel ? 'advanced' : modelToUse;
+      }
+      
+      // If the result includes information about BART, add that to model_used
+      if (result.summary && result.summarization_method === "bart") {
+        result.model_used += " + BART summarizer";
+      }
+    }
     
     // Update API status to online since we got a successful response
     safeStorageSet({ apiStatus: 'online' });
@@ -482,6 +499,7 @@ async function analyzeWithSummary(text, options = {}) {
     // Add placeholder for summary
     sentimentResult.summary = "Summary unavailable (API error)";
     sentimentResult.summarization_method = "none";
+    sentimentResult.model_used = "simple_rule_based";
     
     return sentimentResult;
   }
@@ -625,6 +643,7 @@ async function checkApiHealth(apiUrl) {
       // If API recommends a different model than currently selected, consider switching
       getStoredSettings().then(settings => {
         if (settings.selectedModel !== 'simple' && 
+            statusData.loaded_models && 
             !statusData.loaded_models.includes(settings.selectedModel) && 
             statusData.recommended_model && 
             statusData.recommended_model !== settings.selectedModel) {
@@ -680,7 +699,8 @@ async function preloadAllModels(apiUrl) {
     
     // Models to load (exclude 'simple' as it's always available)
     const modelsToLoad = statusData.available_models.filter(model => 
-      model !== 'simple' && !statusData.loaded_models.includes(model)
+      model !== 'simple' && 
+      (!statusData.loaded_models || !statusData.loaded_models.includes(model))
     );
     
     if (modelsToLoad.length === 0) {
