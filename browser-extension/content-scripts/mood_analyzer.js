@@ -130,7 +130,7 @@ function findMainPostContent() {
                         
                         // Always display summary for tweets (if available)
                         if (response.summary) {
-                            displaySummary(postElement, response.summary);
+                            displaySummary(postElement, response.summary, response);
                         }
                         
                         console.log('Analysis successful');
@@ -426,108 +426,239 @@ function displaySummary(postElement, summary) {
  * Displays the generated summary below a tweet
  * @param {HTMLElement} tweetElement - The parent tweet element
  * @param {string} summary - The generated summary text
+ * @param {object} responseData - The full analysis response data
  */
-function displaySummary(tweetElement, summary) {
-  // Check if we already added a summary to this tweet
+function displaySummary(tweetElement, summary, responseData = null) {
+  // Check if a summary already exists for this tweet
   if (tweetElement.querySelector('.mood-map-summary-container')) {
-    return;
+    return; // Already has a summary, don't add another
   }
   
-  // Create summary container
+  // Store the response data in local variable to prevent global scope access
+  const response = responseData;
+  
+  // Create the summary container
   const summaryContainer = document.createElement('div');
   summaryContainer.className = 'mood-map-summary-container';
   summaryContainer.style.margin = '10px 0';
-  summaryContainer.style.padding = '10px 15px';
+  summaryContainer.style.padding = '12px 15px';
   summaryContainer.style.borderRadius = '12px';
-  summaryContainer.style.backgroundColor = 'rgba(29, 161, 242, 0.1)';
-  summaryContainer.style.borderLeft = '4px solid #1da1f2';
+  summaryContainer.style.backgroundColor = 'var(--background-secondary, rgba(247, 249, 249, 0.1))';
   summaryContainer.style.fontSize = '14px';
-  summaryContainer.style.lineHeight = '1.4';
-  summaryContainer.style.color = 'inherit';
+  summaryContainer.style.lineHeight = '1.5';
+  summaryContainer.style.color = 'var(--text-primary, rgb(15, 20, 25))';
+  summaryContainer.style.borderLeft = '3px solid var(--accent-blue, rgb(29, 155, 240))';
+  summaryContainer.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)';
+  summaryContainer.style.transition = 'all 0.2s ease';
+
+  // Create a heading for the summary
+  const summaryHeading = document.createElement('div');
+  summaryHeading.style.fontWeight = 'bold';
+  summaryHeading.style.marginBottom = '8px';
+  summaryHeading.style.display = 'flex';
+  summaryHeading.style.alignItems = 'center';
+  summaryHeading.style.justifyContent = 'space-between';
+  summaryHeading.style.color = 'var(--text-primary, rgb(15, 20, 25))';
   
-  // Create header with icon
-  const summaryHeader = document.createElement('div');
-  summaryHeader.style.display = 'flex';
-  summaryHeader.style.alignItems = 'center';
-  summaryHeader.style.marginBottom = '6px';
-  summaryHeader.style.fontWeight = 'bold';
+  // Create the heading content with icon
+  const headingContent = document.createElement('div');
+  headingContent.style.display = 'flex';
+  headingContent.style.alignItems = 'center';
   
-  // Add icon (using emoji as placeholder, can be replaced with SVG)
-  const iconSpan = document.createElement('span');
-  iconSpan.textContent = '✨';
-  iconSpan.style.marginRight = '6px';
+  // Add an icon to the heading
+  const summaryIcon = document.createElement('span');
+  summaryIcon.innerHTML = '✨'; // Sparkle icon - more elegant than document icon
+  summaryIcon.style.marginRight = '8px';
+  summaryIcon.style.fontSize = '16px';
   
-  // Add "AI Summary" text
-  const headerText = document.createElement('span');
+  // Get the heading text - show summarization method if available
+  const headingText = document.createElement('span');
   
-  // Check if we have model information in the response
-  if (response && response.summarization_method) {
-    if (response.summarization_method === 'bart') {
-      headerText.textContent = 'BART Summary';
-    } else {
-      headerText.textContent = 'AI Summary';
+  // Determine heading based on content type and model info
+  let headingLabel = 'AI Summary';
+  if (response) {
+    if (response.content_type === 'tweet') {
+      headingLabel = 'Tweet Summary';
+    } else if (response.content_type === 'news') {
+      headingLabel = 'News Summary';
+    } else if (response.content_type === 'academic') {
+      headingLabel = 'Research Summary';
+    } else if (response.summarization_method === 'bart') {
+      headingLabel = 'BART Summary';
     }
-  } else {
-    headerText.textContent = 'AI Summary';
   }
+  headingText.textContent = headingLabel;
   
-  // Assemble header
-  summaryHeader.appendChild(iconSpan);
-  summaryHeader.appendChild(headerText);
+  // Assemble the heading content
+  headingContent.appendChild(summaryIcon);
+  headingContent.appendChild(headingText);
+  summaryHeading.appendChild(headingContent);
   
-  // Create summary text element
+  // Add an expand/collapse button
+  const expandButton = document.createElement('button');
+  expandButton.textContent = '−'; // Minus sign for collapse
+  expandButton.style.backgroundColor = 'transparent';
+  expandButton.style.border = 'none';
+  expandButton.style.color = 'var(--accent-blue, rgb(29, 155, 240))';
+  expandButton.style.fontSize = '18px';
+  expandButton.style.cursor = 'pointer';
+  expandButton.style.padding = '0 4px';
+  expandButton.style.lineHeight = '1';
+  expandButton.style.fontWeight = 'bold';
+  expandButton.title = 'Collapse summary';
+  summaryHeading.appendChild(expandButton);
+  
+  // Create the summary text element with improved formatting
   const summaryText = document.createElement('div');
+  summaryText.className = 'mood-map-summary-text';
+  summaryText.style.transition = 'max-height 0.3s ease-in-out, opacity 0.2s ease-in-out';
+  
+  // Format the summary text
+  summary = formatSummaryText(summary);
   summaryText.textContent = summary;
   
   // If we have model information, add a small attribution line
-  if (response && response.model_used) {
+  if (response && (response.model_used || response.summarization_method)) {
     const modelAttribution = document.createElement('div');
     modelAttribution.style.fontSize = '11px';
-    modelAttribution.style.marginTop = '8px';
+    modelAttribution.style.marginTop = '10px';
     modelAttribution.style.color = 'var(--text-tertiary, rgb(83, 100, 113))';
     modelAttribution.style.fontStyle = 'italic';
     
     // Display appropriate model info
-    if (response.model_used.includes('+')) {
+    let attributionText = '';
+    if (response.model_used && response.model_used.includes('+')) {
       // For combined models (like "simple + BART")
-      modelAttribution.textContent = `Generated using: ${response.model_used}`;
+      attributionText = `Generated using: ${response.model_used}`;
     } else if (response.summarization_method === 'bart') {
-      // For BART summarization with unspecified sentiment model
-      modelAttribution.textContent = `Generated using: ${response.model_used || 'BART summarizer'}`;
+      // For BART summarization
+      attributionText = `Generated using: ${response.model_used || 'BART summarizer'}`;
+    } else if (response.model_used) {
+      // Default attribution with known model
+      attributionText = `Generated using: ${response.model_used}`;
     } else {
-      // Default attribution
-      modelAttribution.textContent = `Generated using: ${response.model_used || 'AI model'}`;
+      // Generic attribution when model info is missing
+      attributionText = 'Generated using AI summarization';
     }
     
+    modelAttribution.textContent = attributionText;
     summaryText.appendChild(modelAttribution);
   }
   
-  // Assemble summary container
-  summaryContainer.appendChild(summaryHeader);
+  // Add hover effect to the container
+  summaryContainer.addEventListener('mouseenter', () => {
+    summaryContainer.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+    summaryContainer.style.backgroundColor = 'var(--background-tertiary, rgba(247, 249, 249, 0.15))';
+  });
+  
+  summaryContainer.addEventListener('mouseleave', () => {
+    summaryContainer.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)';
+    summaryContainer.style.backgroundColor = 'var(--background-secondary, rgba(247, 249, 249, 0.1))';
+  });
+  
+  // Add expand/collapse functionality
+  expandButton.addEventListener('click', () => {
+    if (summaryText.style.display === 'none') {
+      // Expand
+      summaryText.style.display = 'block';
+      expandButton.textContent = '−'; // Minus sign
+      expandButton.title = 'Collapse summary';
+      
+      // Animate expansion
+      summaryText.style.maxHeight = '1000px';
+      summaryText.style.opacity = '1';
+    } else {
+      // Collapse
+      expandButton.textContent = '+'; // Plus sign
+      expandButton.title = 'Expand summary';
+      
+      // Animate collapse
+      summaryText.style.maxHeight = '0';
+      summaryText.style.opacity = '0';
+      
+      // After animation completes, hide the element
+      setTimeout(() => {
+        if (expandButton.textContent === '+') {
+          summaryText.style.display = 'none';
+        }
+      }, 300);
+    }
+  });
+  
+  // Assemble the summary container
+  summaryContainer.appendChild(summaryHeading);
   summaryContainer.appendChild(summaryText);
   
-  // Find a good place to insert the summary in the tweet
-  const tweetContent = tweetElement.querySelector('[data-testid="tweetText"]')?.parentElement;
-  if (tweetContent) {
-    // Try to find the bottom of tweet content to insert after
-    const possibleInsertPoints = [
-      tweetElement.querySelector('[data-testid="reply"]')?.parentElement?.parentElement,
-      tweetElement.querySelector('[data-testid="like"]')?.parentElement?.parentElement?.parentElement
-    ];
-    
-    // Find the first valid insertion point
-    const insertionPoint = possibleInsertPoints.find(el => el && el.parentElement);
-    
-    if (insertionPoint) {
-      insertionPoint.parentElement.insertBefore(summaryContainer, insertionPoint);
+  // Find the right place to insert the summary in the tweet
+  const actionBar = tweetElement.querySelector('[role="group"]');
+  if (actionBar) {
+    // Insert after the action bar
+    if (actionBar.nextSibling) {
+      actionBar.parentNode.insertBefore(summaryContainer, actionBar.nextSibling);
     } else {
-      // Fallback: append to the tweet content
-      tweetContent.appendChild(summaryContainer);
+      actionBar.parentNode.appendChild(summaryContainer);
     }
   } else {
-    // Last resort: append to the end of the tweet
+    // If action bar not found, append to the tweet
     tweetElement.appendChild(summaryContainer);
   }
+  
+  // Log that we've added a summary
+  console.log('Added summary to tweet:', summary);
+}
+
+/**
+ * Formats the summary text for better readability
+ * @param {string} summary - The raw summary text
+ * @returns {string} - The formatted summary text
+ */
+function formatSummaryText(summary) {
+  if (!summary) return '';
+  
+  // Clean up the summary
+  let formattedSummary = summary.trim();
+  
+  // Replace multiple spaces with a single space
+  formattedSummary = formattedSummary.replace(/\s+/g, ' ');
+  
+  // Ensure sentence ends with proper punctuation
+  if (!formattedSummary.match(/[.!?]$/)) {
+    formattedSummary += '.';
+  }
+  
+  // Ensure first letter is capitalized
+  formattedSummary = formattedSummary.charAt(0).toUpperCase() + formattedSummary.slice(1);
+  
+  // Remove common redundant phrases
+  formattedSummary = formattedSummary
+    .replace(/^This tweet (discusses|mentions|talks about|states that)/i, '')
+    .replace(/^The tweet (discusses|mentions|talks about|states that)/i, '')
+    .replace(/^Tweet (discusses|mentions|talks about|states that)/i, '')
+    .replace(/^This article (discusses|mentions|talks about|states that)/i, '')
+    .replace(/^The article (discusses|mentions|talks about|states that)/i, '')
+    .replace(/^Article (discusses|mentions|talks about|states that)/i, '');
+  
+  // Re-capitalize first letter after removing phrases
+  formattedSummary = formattedSummary.trim();
+  formattedSummary = formattedSummary.charAt(0).toUpperCase() + formattedSummary.slice(1);
+  
+  // Fix common summarization issues - repeated phrases
+  const phrases = formattedSummary.split('. ');
+  if (phrases.length > 1) {
+    const uniquePhrases = [];
+    for (const phrase of phrases) {
+      const cleanPhrase = phrase.trim();
+      if (cleanPhrase && !uniquePhrases.includes(cleanPhrase)) {
+        uniquePhrases.push(cleanPhrase);
+      }
+    }
+    formattedSummary = uniquePhrases.join('. ');
+    if (!formattedSummary.endsWith('.')) {
+      formattedSummary += '.';
+    }
+  }
+  
+  return formattedSummary;
 }
 
 // Function to check for URL changes (to detect navigation to individual posts)
@@ -564,7 +695,8 @@ history.pushState = function() {
 };
 
 const replaceState = history.replaceState;
-replaceState.apply(history, arguments);
+history.replaceState = function() {
+    replaceState.apply(history, arguments);
     checkForUrlChange();
 };
 
@@ -996,17 +1128,27 @@ function analyzeTweetText(text, loadingBadgeContainer, attempt = 1) {
       return;
     }
     
-    // Extract sentiment information
+    // Extract sentiment information - ensure consistent format with popup display
     let sentiment, score, category;
     
+    // Normalize result format to ensure consistency with popup.js
     if (response.label) {
-      sentiment = response.label;
-      score = response.score || 0;
-      category = response.category !== undefined ? response.category : 1; // Default to neutral if category missing
-    } else if (response.sentiment) {
-      sentiment = response.sentiment;
-      score = response.score || 0;
-      category = response.prediction !== undefined ? response.prediction : 1; // Default to neutral if prediction missing
+      sentiment = response.label.charAt(0).toUpperCase() + response.label.slice(1); // Capitalize first letter
+      score = response.score || response.sentiment || 0;
+      category = response.category !== undefined ? response.category : 1; 
+    } else if (response.sentiment !== undefined) {
+      // Convert numerical sentiment to label for consistency
+      if (response.sentiment < -0.3) {
+        sentiment = 'Negative';
+        category = 0;
+      } else if (response.sentiment > 0.3) {
+        sentiment = 'Positive';
+        category = 2;
+      } else {
+        sentiment = 'Neutral';
+        category = 1;
+      }
+      score = response.sentiment;
     } else {
       // Default to neutral if no sentiment info found
       sentiment = 'Neutral';
@@ -1026,13 +1168,22 @@ function analyzeTweetText(text, loadingBadgeContainer, attempt = 1) {
       response.confidence = Math.abs(response.score);
     }
     
-    // Create the sentiment badge with full analysis data for click handling
+    // Ensure response has consistent properties used by both popup and content script
+    const normalizedResponse = {
+      ...response,
+      label: sentiment,
+      category: category,
+      score: score,
+      confidence: response.confidence || 0.6
+    };
+    
+    // Create the sentiment badge with normalized data
     const sentimentBadge = createSentimentBadge(
       sentiment,
       score, 
       false, 
       false, 
-      response  // Pass the full response object for the detailed overlay
+      normalizedResponse  // Pass the normalized response object
     );
     
     // Replace loading badge with sentiment badge
@@ -1048,7 +1199,7 @@ function analyzeTweetText(text, loadingBadgeContainer, attempt = 1) {
                         loadingBadgeContainer.parentElement.closest('article');
       
       if (tweetElement) {
-        displaySummary(tweetElement, response.summary);
+        displaySummary(tweetElement, response.summary, normalizedResponse);
       }
     }
   };
@@ -1060,7 +1211,8 @@ function analyzeTweetText(text, loadingBadgeContainer, attempt = 1) {
     text: trimmedText,
     options: {
       preferAdvancedModel: true, // Always use advanced model (BART) for tweets
-      forceGenerateSummary: true // Always generate summary regardless of length
+      forceGenerateSummary: true, // Always generate summary regardless of length
+      ensureConsistentResults: true // Flag to ensure consistent results with popup
     }
   }, handleResponse);
 }
@@ -1454,81 +1606,162 @@ function showDetailedOverlay(element, sentimentData, displayData) {
 }
 
 // Function to display tweet summary
-function displaySummary(tweetElement, summary) {
+function displaySummary(tweetElement, summary, responseData = null) {
   // Check if a summary already exists for this tweet
   if (tweetElement.querySelector('.mood-map-summary-container')) {
     return; // Already has a summary, don't add another
   }
   
+  // Store the response data in local variable to prevent global scope access
+  const response = responseData;
+  
   // Create the summary container
   const summaryContainer = document.createElement('div');
   summaryContainer.className = 'mood-map-summary-container';
-  summaryContainer.style.margin = '8px 0';
-  summaryContainer.style.padding = '10px 12px';
+  summaryContainer.style.margin = '10px 0';
+  summaryContainer.style.padding = '12px 15px';
   summaryContainer.style.borderRadius = '12px';
   summaryContainer.style.backgroundColor = 'var(--background-secondary, rgba(247, 249, 249, 0.1))';
   summaryContainer.style.fontSize = '14px';
-  summaryContainer.style.lineHeight = '1.4';
-  summaryContainer.style.color = 'var(--text-secondary, rgb(83, 100, 113))';
+  summaryContainer.style.lineHeight = '1.5';
+  summaryContainer.style.color = 'var(--text-primary, rgb(15, 20, 25))';
   summaryContainer.style.borderLeft = '3px solid var(--accent-blue, rgb(29, 155, 240))';
+  summaryContainer.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)';
+  summaryContainer.style.transition = 'all 0.2s ease';
 
   // Create a heading for the summary
   const summaryHeading = document.createElement('div');
   summaryHeading.style.fontWeight = 'bold';
-  summaryHeading.style.marginBottom = '4px';
+  summaryHeading.style.marginBottom = '8px';
   summaryHeading.style.display = 'flex';
   summaryHeading.style.alignItems = 'center';
+  summaryHeading.style.justifyContent = 'space-between';
   summaryHeading.style.color = 'var(--text-primary, rgb(15, 20, 25))';
+  
+  // Create the heading content with icon
+  const headingContent = document.createElement('div');
+  headingContent.style.display = 'flex';
+  headingContent.style.alignItems = 'center';
   
   // Add an icon to the heading
   const summaryIcon = document.createElement('span');
-  summaryIcon.innerHTML = '📝'; // Summary icon
-  summaryIcon.style.marginRight = '6px';
+  summaryIcon.innerHTML = '✨'; // Sparkle icon - more elegant than document icon
+  summaryIcon.style.marginRight = '8px';
+  summaryIcon.style.fontSize = '16px';
   
   // Get the heading text - show summarization method if available
   const headingText = document.createElement('span');
   
-  // Check if we have model information in the response
-  if (response && response.summarization_method) {
-    if (response.summarization_method === 'bart') {
-      headingText.textContent = 'BART Summary';
-    } else {
-      headingText.textContent = 'AI Summary';
+  // Determine heading based on content type and model info
+  let headingLabel = 'AI Summary';
+  if (response) {
+    if (response.content_type === 'tweet') {
+      headingLabel = 'Tweet Summary';
+    } else if (response.content_type === 'news') {
+      headingLabel = 'News Summary';
+    } else if (response.content_type === 'academic') {
+      headingLabel = 'Research Summary';
+    } else if (response.summarization_method === 'bart') {
+      headingLabel = 'BART Summary';
     }
-  } else {
-    headingText.textContent = 'AI Summary';
   }
+  headingText.textContent = headingLabel;
   
-  // Assemble the heading
-  summaryHeading.appendChild(summaryIcon);
-  summaryHeading.appendChild(headingText);
+  // Assemble the heading content
+  headingContent.appendChild(summaryIcon);
+  headingContent.appendChild(headingText);
+  summaryHeading.appendChild(headingContent);
   
-  // Create the summary text element
+  // Add an expand/collapse button
+  const expandButton = document.createElement('button');
+  expandButton.textContent = '−'; // Minus sign for collapse
+  expandButton.style.backgroundColor = 'transparent';
+  expandButton.style.border = 'none';
+  expandButton.style.color = 'var(--accent-blue, rgb(29, 155, 240))';
+  expandButton.style.fontSize = '18px';
+  expandButton.style.cursor = 'pointer';
+  expandButton.style.padding = '0 4px';
+  expandButton.style.lineHeight = '1';
+  expandButton.style.fontWeight = 'bold';
+  expandButton.title = 'Collapse summary';
+  summaryHeading.appendChild(expandButton);
+  
+  // Create the summary text element with improved formatting
   const summaryText = document.createElement('div');
+  summaryText.className = 'mood-map-summary-text';
+  summaryText.style.transition = 'max-height 0.3s ease-in-out, opacity 0.2s ease-in-out';
+  
+  // Format the summary text
+  summary = formatSummaryText(summary);
   summaryText.textContent = summary;
   
   // If we have model information, add a small attribution line
-  if (response && response.model_used) {
+  if (response && (response.model_used || response.summarization_method)) {
     const modelAttribution = document.createElement('div');
     modelAttribution.style.fontSize = '11px';
-    modelAttribution.style.marginTop = '8px';
+    modelAttribution.style.marginTop = '10px';
     modelAttribution.style.color = 'var(--text-tertiary, rgb(83, 100, 113))';
     modelAttribution.style.fontStyle = 'italic';
     
     // Display appropriate model info
-    if (response.model_used.includes('+')) {
+    let attributionText = '';
+    if (response.model_used && response.model_used.includes('+')) {
       // For combined models (like "simple + BART")
-      modelAttribution.textContent = `Generated using: ${response.model_used}`;
+      attributionText = `Generated using: ${response.model_used}`;
     } else if (response.summarization_method === 'bart') {
-      // For BART summarization with unspecified sentiment model
-      modelAttribution.textContent = `Generated using: ${response.model_used || 'BART summarizer'}`;
+      // For BART summarization
+      attributionText = `Generated using: ${response.model_used || 'BART summarizer'}`;
+    } else if (response.model_used) {
+      // Default attribution with known model
+      attributionText = `Generated using: ${response.model_used}`;
     } else {
-      // Default attribution
-      modelAttribution.textContent = `Generated using: ${response.model_used || 'AI model'}`;
+      // Generic attribution when model info is missing
+      attributionText = 'Generated using AI summarization';
     }
     
+    modelAttribution.textContent = attributionText;
     summaryText.appendChild(modelAttribution);
   }
+  
+  // Add hover effect to the container
+  summaryContainer.addEventListener('mouseenter', () => {
+    summaryContainer.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+    summaryContainer.style.backgroundColor = 'var(--background-tertiary, rgba(247, 249, 249, 0.15))';
+  });
+  
+  summaryContainer.addEventListener('mouseleave', () => {
+    summaryContainer.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)';
+    summaryContainer.style.backgroundColor = 'var(--background-secondary, rgba(247, 249, 249, 0.1))';
+  });
+  
+  // Add expand/collapse functionality
+  expandButton.addEventListener('click', () => {
+    if (summaryText.style.display === 'none') {
+      // Expand
+      summaryText.style.display = 'block';
+      expandButton.textContent = '−'; // Minus sign
+      expandButton.title = 'Collapse summary';
+      
+      // Animate expansion
+      summaryText.style.maxHeight = '1000px';
+      summaryText.style.opacity = '1';
+    } else {
+      // Collapse
+      expandButton.textContent = '+'; // Plus sign
+      expandButton.title = 'Expand summary';
+      
+      // Animate collapse
+      summaryText.style.maxHeight = '0';
+      summaryText.style.opacity = '0';
+      
+      // After animation completes, hide the element
+      setTimeout(() => {
+        if (expandButton.textContent === '+') {
+          summaryText.style.display = 'none';
+        }
+      }, 300);
+    }
+  });
   
   // Assemble the summary container
   summaryContainer.appendChild(summaryHeading);
@@ -1550,4 +1783,58 @@ function displaySummary(tweetElement, summary) {
   
   // Log that we've added a summary
   console.log('Added summary to tweet:', summary);
+}
+
+/**
+ * Formats the summary text for better readability
+ * @param {string} summary - The raw summary text
+ * @returns {string} - The formatted summary text
+ */
+function formatSummaryText(summary) {
+  if (!summary) return '';
+  
+  // Clean up the summary
+  let formattedSummary = summary.trim();
+  
+  // Replace multiple spaces with a single space
+  formattedSummary = formattedSummary.replace(/\s+/g, ' ');
+  
+  // Ensure sentence ends with proper punctuation
+  if (!formattedSummary.match(/[.!?]$/)) {
+    formattedSummary += '.';
+  }
+  
+  // Ensure first letter is capitalized
+  formattedSummary = formattedSummary.charAt(0).toUpperCase() + formattedSummary.slice(1);
+  
+  // Remove common redundant phrases
+  formattedSummary = formattedSummary
+    .replace(/^This tweet (discusses|mentions|talks about|states that)/i, '')
+    .replace(/^The tweet (discusses|mentions|talks about|states that)/i, '')
+    .replace(/^Tweet (discusses|mentions|talks about|states that)/i, '')
+    .replace(/^This article (discusses|mentions|talks about|states that)/i, '')
+    .replace(/^The article (discusses|mentions|talks about|states that)/i, '')
+    .replace(/^Article (discusses|mentions|talks about|states that)/i, '');
+  
+  // Re-capitalize first letter after removing phrases
+  formattedSummary = formattedSummary.trim();
+  formattedSummary = formattedSummary.charAt(0).toUpperCase() + formattedSummary.slice(1);
+  
+  // Fix common summarization issues - repeated phrases
+  const phrases = formattedSummary.split('. ');
+  if (phrases.length > 1) {
+    const uniquePhrases = [];
+    for (const phrase of phrases) {
+      const cleanPhrase = phrase.trim();
+      if (cleanPhrase && !uniquePhrases.includes(cleanPhrase)) {
+        uniquePhrases.push(cleanPhrase);
+      }
+    }
+    formattedSummary = uniquePhrases.join('. ');
+    if (!formattedSummary.endsWith('.')) {
+      formattedSummary += '.';
+    }
+  }
+  
+  return formattedSummary;
 }

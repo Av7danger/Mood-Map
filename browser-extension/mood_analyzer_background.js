@@ -317,7 +317,8 @@ async function analyzeSentiment(text, options = {}) {
     }
     
     // Get model to use - either from options or from stored settings
-    const modelToUse = options.model || selectedModel;
+    // BUT default to 'ensemble' instead of advanced if not specified
+    const modelToUse = options.model || selectedModel || 'ensemble';
     
     // Optimize for short text analysis - always use simple model for very short text
     if (text.length < 30 && !text.includes('?')) {
@@ -343,22 +344,7 @@ async function analyzeSentiment(text, options = {}) {
     const cleanApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
     let endpoint = `${cleanApiUrl}/analyze`;
     
-    // For simple model, use the specialized fast endpoint if available
-    if (modelToUse === 'simple') {
-      // Try to use the simple endpoint, but fall back to the main endpoint if it fails
-      try {
-        const testResponse = await fetch(`${cleanApiUrl}/extension/analyze_simple`, {
-          method: 'HEAD'
-        });
-        if (testResponse.ok) {
-          endpoint = `${cleanApiUrl}/extension/analyze_simple`;
-        }
-      } catch (error) {
-        console.log('Simple endpoint not available, using main endpoint');
-      }
-    }
-    
-    // Make API request - the server will lazy-load the required model
+    // Make API request 
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
@@ -376,6 +362,37 @@ async function analyzeSentiment(text, options = {}) {
     });
     
     if (!response.ok) {
+      // If we get a 503 error and are trying to use 'advanced' model, fall back to ensemble
+      if (response.status === 503 && modelToUse === 'advanced') {
+        console.log('Advanced model not available, falling back to ensemble model');
+        
+        // Retry with ensemble model
+        const fallbackResponse = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            text: text,
+            model_type: 'ensemble', // Use ensemble as fallback
+            features: {
+              sentiment: true,
+              summarization: false
+            }
+          })
+        });
+        
+        if (fallbackResponse.ok) {
+          const result = await fallbackResponse.json();
+          console.log("Fallback API returned result:", result);
+          // Mark it as a fallback result
+          result.fallback_model = true;
+          result.original_model = modelToUse;
+          return result;
+        }
+      }
+      
       throw new Error(`API returned ${response.status}: ${response.statusText}`);
     }
     
@@ -426,15 +443,20 @@ async function analyzeWithSummary(text, options = {}) {
       console.log('API is offline, falling back to simple sentiment model without summary');
       const sentimentResult = processSimpleAnalysis(text);
       
-      // Add a simple placeholder for summary
-      sentimentResult.summary = "Summary unavailable (API is offline)";
-      sentimentResult.summarization_method = "none";
+      // Generate a basic fallback summary using simple rules
+      const fallbackSummary = generateFallbackSummary(text);
+      sentimentResult.summary = fallbackSummary;
+      sentimentResult.summarization_method = "fallback";
       sentimentResult.model_used = "simple_rule_based";
       
       return sentimentResult;
     }
     
     console.log(`Using API with model: ${preferAdvancedModel ? 'advanced' : modelToUse} for analysis with summary`);
+    
+    // Determine content type for better summarization
+    const contentType = determineContentType(text, options);
+    console.log(`Detected content type: ${contentType}`);
     
     // Get API endpoint - specifically use the combined endpoint
     const cleanApiUrl = apiUrl.endsWith('/') ? apiUrl.slice(0, -1) : apiUrl;
@@ -451,7 +473,19 @@ async function analyzeWithSummary(text, options = {}) {
         text: text,
         model_type: preferAdvancedModel ? 'advanced' : modelToUse,
         // Add a flag to inform the API that we're okay with model fallback
-        fallback_to_available: true
+        fallback_to_available: true,
+        // Send content type for context-aware summarization
+        content_type: contentType,
+        // Force generating summary if specified in options
+        force_generate_summary: options.forceGenerateSummary === true,
+        // Additional options for fine-tuning summary
+        summary_options: {
+          max_length: options.summaryMaxLength || 150,
+          min_length: options.summaryMinLength || 40,
+          output_format: options.summaryFormat || "paragraph",
+          clean_text: true,
+          format_summary: true
+        }
       })
     });
     
@@ -462,24 +496,33 @@ async function analyzeWithSummary(text, options = {}) {
     const result = await response.json();
     console.log("API returned combined result:", result);
     
+    // Post-process the summary - improve formatting and readability
+    if (result.summary) {
+      result.summary = postProcessSummary(result.summary, contentType);
+    }
+    
+    // Normalize the result to ensure consistent format between popup and content script
+    // This is critical for ensuring the same visual output in all views
+    const normalizedResult = normalizeAnalysisResult(result);
+    
     // Ensure we have a model_used field to display to the user
-    if (!result.model_used) {
-      if (result.fallback_to && result.fallback_to !== "none") {
-        result.model_used = result.fallback_to;
+    if (!normalizedResult.model_used) {
+      if (normalizedResult.fallback_to && normalizedResult.fallback_to !== "none") {
+        normalizedResult.model_used = normalizedResult.fallback_to;
       } else {
-        result.model_used = preferAdvancedModel ? 'advanced' : modelToUse;
+        normalizedResult.model_used = preferAdvancedModel ? 'advanced' : modelToUse;
       }
       
       // If the result includes information about BART, add that to model_used
-      if (result.summary && result.summarization_method === "bart") {
-        result.model_used += " + BART summarizer";
+      if (normalizedResult.summary && normalizedResult.summarization_method === "bart") {
+        normalizedResult.model_used += " + BART summarizer";
       }
     }
     
     // Update API status to online since we got a successful response
     safeStorageSet({ apiStatus: 'online' });
     
-    return result;
+    return normalizedResult;
     
   } catch (error) {
     console.error("Error analyzing sentiment with summary:", error);
@@ -496,13 +539,238 @@ async function analyzeWithSummary(text, options = {}) {
     console.log("Falling back to offline processing due to error");
     const sentimentResult = processSimpleAnalysis(text);
     
-    // Add placeholder for summary
-    sentimentResult.summary = "Summary unavailable (API error)";
-    sentimentResult.summarization_method = "none";
+    // Generate a fallback summary
+    const fallbackSummary = generateFallbackSummary(text);
+    sentimentResult.summary = fallbackSummary;
+    sentimentResult.summarization_method = "fallback";
     sentimentResult.model_used = "simple_rule_based";
     
     return sentimentResult;
   }
+}
+
+// Function to determine content type for better context-aware summarization
+function determineContentType(text, options = {}) {
+  // Use explicit content type if provided in options
+  if (options.contentType) {
+    return options.contentType;
+  }
+  
+  // Check for tweet-like content
+  if (text.length < 300) {
+    return 'tweet';
+  }
+  
+  // Check for news article patterns
+  const newsPatterns = [
+    /breaking news/i,
+    /according to sources/i,
+    /reported today/i,
+    /press release/i
+  ];
+  
+  for (const pattern of newsPatterns) {
+    if (pattern.test(text)) {
+      return 'news';
+    }
+  }
+  
+  // Check for academic content
+  const academicPatterns = [
+    /research suggests/i,
+    /study found/i,
+    /hypothesis/i,
+    /data indicates/i,
+    /in conclusion/i
+  ];
+  
+  for (const pattern of academicPatterns) {
+    if (pattern.test(text)) {
+      return 'academic';
+    }
+  }
+  
+  // Default to general content type
+  return 'general';
+}
+
+// Function to generate a fallback summary when API is unavailable
+function generateFallbackSummary(text) {
+  // For very short text, just return the text itself
+  if (text.length < 100) {
+    return text;
+  }
+  
+  try {
+    // Extract first sentence and last sentence as a simple summary
+    const sentences = text.match(/[^\.!\?]+[\.!\?]+/g) || [text];
+    
+    if (sentences.length <= 2) {
+      return text;
+    }
+    
+    // Get first sentence
+    const firstSentence = sentences[0].trim();
+    
+    // Get a meaningful sentence from the middle
+    const middleIndex = Math.floor(sentences.length / 2);
+    const middleSentence = sentences[middleIndex].trim();
+    
+    // Get last sentence
+    const lastSentence = sentences[sentences.length - 1].trim();
+    
+    // Create a basic summary with first, middle, and last sentences
+    let summary = firstSentence;
+    
+    // Only add middle sentence if it's different enough from first and last
+    if (!isOverlappingSentence(middleSentence, firstSentence) && 
+        !isOverlappingSentence(middleSentence, lastSentence)) {
+      summary += ' ' + middleSentence;
+    }
+    
+    // Add last sentence if it's different from first
+    if (!isOverlappingSentence(lastSentence, firstSentence)) {
+      summary += ' ' + lastSentence;
+    }
+    
+    return summary;
+  } catch (error) {
+    console.error('Error generating fallback summary:', error);
+    // Return a portion of the text as last resort
+    return text.substring(0, 150) + '...';
+  }
+}
+
+// Helper function to check if sentences are too similar (have significant word overlap)
+function isOverlappingSentence(sentence1, sentence2) {
+  const words1 = new Set(sentence1.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+  const words2 = new Set(sentence2.toLowerCase().split(/\s+/).filter(w => w.length > 3));
+  
+  let overlappingWords = 0;
+  for (const word of words1) {
+    if (words2.has(word)) {
+      overlappingWords++;
+    }
+  }
+  
+  // Calculate overlap ratio
+  const minWords = Math.min(words1.size, words2.size);
+  const overlapRatio = minWords > 0 ? overlappingWords / minWords : 0;
+  
+  // Consider significant overlap if more than 60% of words overlap
+  return overlapRatio > 0.6;
+}
+
+// Function to post-process summary for better readability
+function postProcessSummary(summary, contentType = 'general') {
+  if (!summary) return summary;
+  
+  // Clean up the summary
+  let processedSummary = summary.trim();
+  
+  // Replace multiple spaces with a single space
+  processedSummary = processedSummary.replace(/\s+/g, ' ');
+  
+  // Ensure sentence ends with proper punctuation
+  if (!processedSummary.match(/[.!?]$/)) {
+    processedSummary += '.';
+  }
+  
+  // Ensure first letter is capitalized
+  processedSummary = processedSummary.charAt(0).toUpperCase() + processedSummary.slice(1);
+  
+  // Remove common redundant phrases based on content type
+  if (contentType === 'tweet') {
+    processedSummary = processedSummary
+      .replace(/^This tweet (discusses|mentions|talks about|states that)/i, '')
+      .replace(/^The tweet (discusses|mentions|talks about|states that)/i, '')
+      .replace(/^Tweet (discusses|mentions|talks about|states that)/i, '');
+  } else if (contentType === 'news') {
+    processedSummary = processedSummary
+      .replace(/^This article (discusses|mentions|talks about|states that)/i, '')
+      .replace(/^The article (discusses|mentions|talks about|states that)/i, '')
+      .replace(/^Article (discusses|mentions|talks about|states that)/i, '');
+  }
+  
+  // Re-capitalize first letter after removing phrases
+  processedSummary = processedSummary.trim();
+  processedSummary = processedSummary.charAt(0).toUpperCase() + processedSummary.slice(1);
+  
+  // Fix common BART output issues - repeated phrases
+  const phrases = processedSummary.split('. ');
+  if (phrases.length > 1) {
+    const uniquePhrases = [];
+    for (const phrase of phrases) {
+      if (phrase && !uniquePhrases.includes(phrase)) {
+        uniquePhrases.push(phrase);
+      }
+    }
+    processedSummary = uniquePhrases.join('. ');
+    if (!processedSummary.endsWith('.')) {
+      processedSummary += '.';
+    }
+  }
+  
+  return processedSummary;
+}
+
+// Helper function to normalize analysis results to a consistent format
+// This ensures the popup and content script display the same information
+function normalizeAnalysisResult(result) {
+  // Start with a copy of the original result to avoid mutating it
+  const normalized = { ...result };
+  
+  // Ensure category is present and in the range 0-2
+  if (normalized.category === undefined) {
+    // Derive category from sentiment score or label
+    if (normalized.label) {
+      if (normalized.label.toLowerCase() === 'negative') normalized.category = 0;
+      else if (normalized.label.toLowerCase() === 'positive') normalized.category = 2;
+      else normalized.category = 1; // neutral
+    } else if (normalized.sentiment !== undefined) {
+      // Convert sentiment score to category
+      if (normalized.sentiment < -0.3) normalized.category = 0;
+      else if (normalized.sentiment > 0.3) normalized.category = 2;
+      else normalized.category = 1;
+    } else {
+      normalized.category = 1; // Default to neutral
+    }
+  }
+  
+  // Ensure sentiment score is present
+  if (normalized.score === undefined && normalized.sentiment !== undefined) {
+    normalized.score = normalized.sentiment;
+  } else if (normalized.score === undefined) {
+    // Generate a score based on category if neither score nor sentiment exists
+    if (normalized.category === 0) normalized.score = -0.7;
+    else if (normalized.category === 2) normalized.score = 0.7;
+    else normalized.score = 0;
+  }
+  
+  // Ensure sentiment value is present (for backward compatibility)
+  if (normalized.sentiment === undefined && normalized.score !== undefined) {
+    normalized.sentiment = normalized.score;
+  }
+  
+  // Ensure label is present
+  if (normalized.label === undefined) {
+    if (normalized.category === 0) normalized.label = 'negative';
+    else if (normalized.category === 2) normalized.label = 'positive';
+    else normalized.label = 'neutral';
+  }
+  
+  // Ensure confidence is present
+  if (normalized.confidence === undefined) {
+    // Calculate confidence based on how far score is from neutral
+    normalized.confidence = Math.min(0.95, Math.abs(normalized.score || 0) * 1.5);
+  }
+  
+  // Ensure model_used is present
+  if (!normalized.model_used) {
+    normalized.model_used = 'unknown';
+  }
+  
+  return normalized;
 }
 
 // Simple offline text analysis
