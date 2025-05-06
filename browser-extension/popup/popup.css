@@ -516,30 +516,49 @@ header::before {
 }
 
 .sentiment-circle {
-  width: 80px;
-  height: 80px;
+  width: 100px;
+  height: 100px;
   border-radius: 50%;
-  background-color: #f0f0f0;
+  background-color: #f8f8f8;
   display: flex;
   justify-content: center;
   align-items: center;
-  margin: 0 auto 15px;
-  border: 3px solid #e0e0e0;
-  transition: all 0.3s ease;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin: 0 auto 20px;
+  border: 4px solid #e0e0e0;
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  position: relative;
+  overflow: hidden;
+}
+
+.sentiment-circle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0) 50%);
+  border-radius: 50%;
+  z-index: 1;
 }
 
 .sentiment-circle span {
-  font-size: 40px;  /* Increased font size for emoji */
-  font-weight: bold;
-  transition: all 0.3s ease;
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  position: relative;
+  z-index: 2;
 }
 
 #sentiment-emoji {
-  font-size: 45px;  /* Larger size specifically for emoji */
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  font-size: 60px;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+  animation: pulse 2s infinite ease-in-out;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
 }
 
 .hidden {
@@ -548,29 +567,20 @@ header::before {
 
 .sentiment-circle.positive {
   border-color: #4caf50;
-  background-color: rgba(76, 175, 80, 0.1);
+  background: radial-gradient(circle, rgba(76, 175, 80, 0.15) 0%, rgba(76, 175, 80, 0.05) 70%);
+  box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
 }
 
 .sentiment-circle.neutral {
   border-color: #ff9800;
-  background-color: rgba(255, 152, 0, 0.1);
+  background: radial-gradient(circle, rgba(255, 152, 0, 0.15) 0%, rgba(255, 152, 0, 0.05) 70%);
+  box-shadow: 0 4px 15px rgba(255, 152, 0, 0.3);
 }
 
 .sentiment-circle.negative {
   border-color: #f44336;
-  background-color: rgba(244, 67, 54, 0.1);
-}
-
-.sentiment-circle::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  border-radius: 50%;
-  background: linear-gradient(135deg, rgba(255,255,255,0.3) 0%, rgba(255,255,255,0) 50%);
-  z-index: 1;
+  background: radial-gradient(circle, rgba(244, 67, 54, 0.15) 0%, rgba(244, 67, 54, 0.05) 70%);
+  box-shadow: 0 4px 15px rgba(244, 67, 54, 0.3);
 }
 
 #sentiment-score {
