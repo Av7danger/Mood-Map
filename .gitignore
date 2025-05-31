@@ -286,7 +286,6 @@ run_everything.py
 run_everything.py
 train_optimized_model.py
 .gitignore
-test_api.py
 test_server.py
 test_summarization.py
 train_fixed_model.py
@@ -367,10 +366,7 @@ src/utils/sentiment_model_saver.py
 scripts/create_robust_model.py
 src/models/sentiment_analyzer.py
 simplified_api.py
-test_api.py
 backend/sentiment_api.py
 run_everything.py
-run_everything.py
-test_api.py
 backend/sentiment_api.py
 notebooks/verify_installation.ipynb

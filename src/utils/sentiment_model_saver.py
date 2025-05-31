@@ -5,12 +5,12 @@ from transformers import DistilBertTokenizer, DistilBertModel, BertTokenizer, Be
 from src.utils.logging_utils import setup_logging
 
 # Setup logging
-logger = setup_logging("model_saver_logs.log")
+logger = setup_logging("logs/model_saver_logs.log")
 
 # Define the model architecture to match what was used in training
 class SentimentClassifier(nn.Module):
     """Neural network model for sentiment analysis using DistilBERT or BERT."""
-    def __init__(self, model_type="distilbert", hidden_dim=768, output_dim=2):
+    def __init__(self, model_type="distilbert", hidden_dim=768, output_dim=3):
         super(SentimentClassifier, self).__init__()
         self.model_type = model_type
         
@@ -81,6 +81,42 @@ class SentimentAnalysisModelWrapper:
         
         # Convert to list
         return predictions.tolist()
+    
+    def get_sentiment_label(self, category_index):
+        """Convert a numeric sentiment category to a human-readable label."""
+        labels = {
+            0: "negative",
+            1: "neutral",
+            2: "positive"
+        }
+        return labels.get(category_index, "unknown")
+    
+    def get_raw_score(self, text):
+        """Return a raw confidence score for the sentiment prediction."""
+        # Convert to list if single string
+        if isinstance(text, str):
+            text = [text]
+        
+        # Tokenize the text
+        encoded = self.tokenizer(
+            text, 
+            padding=True,
+            truncation=True,
+            max_length=512,
+            return_tensors='pt'
+        )
+        
+        # Get model predictions with probabilities
+        self.model.eval()
+        with torch.no_grad():
+            outputs = self.model(
+                input_ids=encoded['input_ids'],
+                attention_mask=encoded['attention_mask']
+            )
+            probabilities = torch.nn.functional.softmax(outputs, dim=1)
+        
+        # Return the probability of the positive class (index 1)
+        return probabilities[0][1].item()
 
 def save_model(model, path):
     try:
@@ -117,7 +153,7 @@ def create_and_save_model(output_path="model.pkl"):
         
         test_results = test_model.predict(test_texts)
         for text, result in zip(test_texts, test_results):
-            sentiment = "Positive" if result == 1 else "Negative"
+            sentiment = test_model.get_sentiment_label(result)
             print(f"'{text}' → {sentiment}")
         
         return True

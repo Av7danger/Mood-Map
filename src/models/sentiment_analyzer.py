@@ -1,43 +1,88 @@
 import joblib
 import torch
-from transformers import pipeline, DistilBertForSequenceClassification, BertForSequenceClassification
+from transformers import pipeline, RobertaForSequenceClassification, BartForSequenceClassification
 import numpy as np
 import re
 import datetime
 import os
 import json
 from src.utils.logging_utils import setup_logging
+from src.utils.rag_enhancer import initialize_sentiment_rag
 
 # Setup logging
-logger = setup_logging("model_logs.log")
+logger = setup_logging("logs/model_logs.log")
 
 class SentimentModel:
     """A wrapper around Hugging Face's sentiment analysis pipeline for nuanced sentiment analysis."""
     
-    def __init__(self, model_type="distilbert"):
-        """Initialize the sentiment analyzer using a pre-trained model."""
-        # Use a model specifically fine-tuned for sentiment analysis
-        if model_type == "distilbert":
-            self.model = DistilBertForSequenceClassification.from_pretrained("distilbert-base-uncased")
-        elif model_type == "bert-base":
-            self.model = BertForSequenceClassification.from_pretrained("bert-base-uncased")
+    def __init__(self, model_type="roberta", safe=False, use_rag=True, use_bart=False):
+        """Initialize the sentiment analyzer using a pre-trained model.
+        
+        Args:
+            model_type: The model type to use ('roberta' or 'bart')
+            safe: If True, don't initialize the analyzer pipeline (useful for inheritance)
+            use_rag: If True, use Retrieval Augmented Generation for enhanced predictions
+            use_bart: If True, use BART for text summarization as part of the pipeline
+        """
+        self.model_type = model_type
+        self.use_rag = use_rag
+        self.use_bart = use_bart
+        
+        # Log model configuration
+        logger.info(f"Initializing SentimentModel with: model_type={model_type}, use_rag={use_rag}, use_bart={use_bart}")
+        
+        # Initialize RAG if requested
+        if use_rag:
+            try:
+                self.rag = initialize_sentiment_rag()
+                logger.info("RAG initialized successfully")
+            except Exception as e:
+                logger.error(f"Error initializing RAG: {str(e)}")
+                self.rag = None
         else:
-            raise ValueError("Invalid model type. Choose 'distilbert' or 'bert-base'.")
+            self.rag = None
+            
+        # Initialize BART if requested
+        if use_bart:
+            try:
+                from transformers import BartForConditionalGeneration, BartTokenizer
+                self.bart_tokenizer = BartTokenizer.from_pretrained("facebook/bart-large-cnn")
+                self.bart_model = BartForConditionalGeneration.from_pretrained("facebook/bart-large-cnn")
+                self.bart_pipeline = pipeline("summarization", model=self.bart_model, tokenizer=self.bart_tokenizer)
+                logger.info("BART initialized successfully with RAG")
+            except Exception as e:
+                logger.error(f"Error initializing BART: {str(e)}")
+                self.use_bart = False
+        
+        # Use a model specifically fine-tuned for sentiment analysis
+        if model_type == "roberta":
+            self.model = RobertaForSequenceClassification.from_pretrained("cardiffnlp/twitter-roberta-base-sentiment")
+            logger.info("Loaded RoBERTa sentiment model with RAG")
+        elif model_type == "bart":
+            # Only use BART for sentiment if not already using it for summarization
+            self.model = BartForSequenceClassification.from_pretrained("facebook/bart-large-mnli")
+            logger.info("Loaded BART sentiment model with RAG")
+        else:
+            raise ValueError("Invalid model type. Choose 'roberta' or 'bart'.")
         
         # Try to use CUDA if available
-        device = 0 if torch.cuda.is_available() else -1
-        print(f"Device set to use {'cuda:' + str(device) if device >= 0 else 'CPU'}")
+        self.device = 0 if torch.cuda.is_available() else -1
+        logger.info(f"Device set to use {'CUDA' if self.device >= 0 else 'CPU'}")
         
-        # Create the sentiment analysis pipeline
-        self.analyzer = pipeline("sentiment-analysis", model=self.model, device=device)
+        # Create the sentiment analysis pipeline (unless in safe mode)
+        if not safe:
+            self.analyzer = pipeline("sentiment-analysis", model=self.model, device=self.device)
+            logger.info("Sentiment analysis pipeline created")
+        else:
+            # In safe mode, don't initialize analyzer
+            self.analyzer = None
+            logger.info("Initialized in safe mode - analyzer pipeline not created")
         
-        # Define the sentiment categories
+        # Define the sentiment categories - UPDATED TO 3 CLASSES FROM 5
         self.sentiment_categories = [
-            "overwhelmingly negative",
             "negative",
             "neutral",
-            "positive",
-            "overwhelmingly positive"
+            "positive"
         ]
         
         # Enhanced and expanded keyword lists for better sentiment detection
@@ -257,7 +302,7 @@ class SentimentModel:
             "😧", "😮", "😴", "🤤", "😪", "😵", "🤐", "🤢", "🤮", "😷", "🤒", "🤕", "🤑",
             
             # Newer neutral emojis
-            "🫠", "🫣", "🫤", "🫡", "🫥", "😶‍🌫️", "❓", "❔", "⁉️", "‼️", "🤷", "🤔", "🧐",
+            "🫠", "🫣", "🫤", "🫡", "🫥", "😶‍💫", "❓", "❔", "⁉️", "‼️", "🤷", "🤔", "🧐",
             "👀", "👁️", "🗿", "💭", "🫦", "🕰️", "🧠", "🦧", "🫰", "🤌", "🦾", "🧘", "🧘‍♀️",
             "🧘‍♂️", "🕯️", "🧿", "🫙", "😬🤔", "👀👄👀", "🤨📸", "🧐🤷", "🚶‍♀️🚶‍♂️"
         ]
@@ -781,7 +826,7 @@ class SentimentModel:
         Args:
             texts: A string or list of strings to analyze
         Returns:
-            List of sentiment category indices (0-4) corresponding to the 5 sentiment levels
+            List of sentiment category indices (0-2) corresponding to the 3 sentiment levels
         """
         # Make sure input is a list
         if isinstance(texts, str):
@@ -790,13 +835,7 @@ class SentimentModel:
         # Get predictions from the pipeline
         results = self.analyzer(texts)
         
-        # Overwhelmingly negative phrase list
-        overwhelmingly_negative_phrases = [
-            "worst experience ever", "absolutely terrible", "never again", "total disaster", "utter disappointment",
-            "completely useless", "beyond awful", "absolutely hate", "worst thing ever", "run away from", "stay away"
-        ]
-        
-        # Convert the pipeline output to our 5 sentiment categories
+        # Convert the pipeline output to our 3 sentiment categories
         predictions = []
         for i, result in enumerate(results):
             # Get the positive score (confidence level)
@@ -810,44 +849,6 @@ class SentimentModel:
                 "score": f"{score:.4f}",
                 "features": []
             }
-            
-            # --- Initialize hashtag_info and emoji_info before use ---
-            hashtag_info = self.extract_hashtags(text)
-            emoji_info = self.extract_emojis(text)
-            
-            # Overwhelmingly negative logic (combined rules)
-            is_overwhelmingly_negative = False
-            negative_signals = 0
-            # 1. Phrase match
-            if any(phrase in text for phrase in overwhelmingly_negative_phrases):
-                negative_signals += 1
-            # 2. Very negative or priority negative keyword
-            if self.detect_keywords(text, self.very_negative_keywords):
-                negative_signals += 1
-            if self.detect_keywords(text, self.priority_negative_words):
-                negative_signals += 1
-            # 3. Intensifier before negative/priority negative word
-            has_intensified_negative, _ = self.check_intensified_word(text, self.priority_negative_words + self.very_negative_keywords)
-            if has_intensified_negative:
-                negative_signals += 1
-            # 4. High negative model score
-            if label == "NEGATIVE" and score > 0.88:
-                negative_signals += 1
-            # 5. Short text with strong negative word
-            if len(text.split()) <= 7 and (self.detect_keywords(text, self.very_negative_keywords) or self.detect_keywords(text, self.priority_negative_words)):
-                negative_signals += 1
-            # 6. Multiple negative hashtags or emojis
-            if hashtag_info["negative_hashtags"] and len(hashtag_info["negative_hashtags"]) > 1:
-                negative_signals += 1
-            if emoji_info["negative_count"] > 1:
-                negative_signals += 1
-            # Require at least 2 strong negative signals for overwhelmingly negative
-            if negative_signals >= 2:
-                category = 0
-                predictions.append(category)
-                sentiment_label = self.get_sentiment_label(category)
-                print(f"'{texts[i]}' → {sentiment_label} (overwhelmingly negative rule)")
-                continue
             
             # Check for keyword presence
             has_very_negative = self.detect_keywords(text, self.very_negative_keywords)
@@ -917,41 +918,41 @@ class SentimentModel:
             
             # --- Mixed/ambiguous logic ---
             if self.has_mixed_signals(text, found_priority_negative, found_priority_positive, has_positive_hashtags, has_negative_hashtags, has_positive_emojis, has_negative_emojis):
-                category = 2  # neutral/mixed
+                category = 1  # neutral/mixed
                 debug_info["features"].append("strong mixed signals (positive & negative)")
             elif has_mixed:
-                category = 2
+                category = 1
                 debug_info["features"].append("mixed/ambiguous keywords or patterns")
             # --- Critical/constructive logic ---
             elif has_critical:
                 # If critical/constructive, lean toward neutral or negative, but boost weight
                 if has_negative or found_priority_negative:
-                    category = 1  # negative
+                    category = 0  # negative
                 else:
-                    category = 2  # neutral/constructive
+                    category = 1  # neutral/constructive
                 debug_info["features"].append("critical/constructive keywords detected (weighted)")
             else:
                 # Advanced sentiment classification rules
                 if has_intensified_negative or (found_priority_negative and found_intensifiers):
                     # Strongly prioritize intensified negative words like "incredibly trash"
-                    category = 0 if not has_negation else 3
+                    category = 0 if not has_negation else 2
                 elif has_intensified_positive or (found_priority_positive and found_intensifiers):
                     # Strongly prioritize intensified positive words
-                    category = 4 if not has_negation else 1
+                    category = 2 if not has_negation else 0
                 elif found_priority_negative:
                     # Prioritize high-impact negative words even without intensifiers
-                    category = 0 if len(found_priority_negative) > 1 else (1 if not has_negation else 3)
+                    category = 0 if len(found_priority_negative) > 1 else (0 if not has_negation else 2)
                 elif found_priority_positive:
                     # Prioritize high-impact positive words even without intensifiers
-                    category = 4 if len(found_priority_positive) > 1 else (3 if not has_negation else 1)
+                    category = 2 if len(found_priority_positive) > 1 else (2 if not has_negation else 0)
                 elif has_mixed:
                     # Mixed sentiment typically indicates a neutral overall sentiment
-                    category = 2
+                    category = 1
                 elif has_negation:
                     if label == "POSITIVE":
-                        category = 1
+                        category = 0
                     else:
-                        category = 3
+                        category = 2
                 elif label == "NEGATIVE":
                     negative_criteria = [
                         has_very_negative,
@@ -961,84 +962,84 @@ class SentimentModel:
                         score > 0.9
                     ]
                     if label == "NEGATIVE" and sum(1 for c in negative_criteria if c) >= 2:
-                        category = 1  # negative
+                        category = 0  # negative
                     if has_very_negative or (has_negative_hashtags and hashtag_sentiment < -0.5) or (has_negative_emojis and emoji_sentiment < -0.5):
-                        category = 0  # overwhelmingly negative
+                        category = 0  # negative
                     elif has_negative or (has_negative_hashtags) or (has_negative_emojis) or score > 0.9:
-                        category = 1  # negative
+                        category = 0  # negative
                     elif has_neutral:
-                        category = 2  # neutral
+                        category = 1  # neutral
                     else:
                         # Lower confidence negative statements or without strong keywords
-                        category = 1  # default to negative for NEGATIVE label
+                        category = 0  # default to negative for NEGATIVE label
                 else:  # label is POSITIVE
                     if has_very_positive or (has_positive_hashtags and hashtag_sentiment > 0.5) or (has_positive_emojis and emoji_sentiment > 0.5):
-                        category = 4  # overwhelmingly positive
+                        category = 2  # positive
                     elif has_positive or (has_positive_hashtags) or (has_positive_emojis) or score > 0.9:
-                        category = 3  # positive
+                        category = 2  # positive
                     elif has_neutral:
-                        category = 2  # neutral
+                        category = 1  # neutral
                     else:
                         # Lower confidence positive statements or without strong keywords
-                        category = 3  # default to positive for POSITIVE label
+                        category = 2  # default to positive for POSITIVE label
                 
                 # Check for neutral overrides - these take precedence unless we have priority words
                 if not (found_priority_negative or found_priority_positive):
                     if (len(text.split()) <= 3) and has_neutral:  # Short neutral statements
-                        category = 2
+                        category = 1
                     elif has_neutral and not (has_very_positive or has_very_negative):
                         if not (has_positive and score > 0.95) and not (has_negative and score > 0.95):
                             # Don't override if we have strong hashtag signals
                             if not (has_positive_hashtags and hashtag_sentiment > 0.5) and not (has_negative_hashtags and hashtag_sentiment < -0.5):
-                                category = 2
+                                category = 1
                 
                 # Hashtag override - strong hashtag signals can override weak model predictions
                 if hashtag_info["hashtags"]:
-                    if hashtag_sentiment > 0.7 and category < 3:  # Strong positive hashtags
-                        category = 3  # Bump to at least positive
-                    elif hashtag_sentiment < -0.7 and category > 1:  # Strong negative hashtags
-                        category = 1  # Bump down to at least negative
+                    if hashtag_sentiment > 0.7 and category < 2:  # Strong positive hashtags
+                        category = 2  # Bump to at least positive
+                    elif hashtag_sentiment < -0.7 and category > 0:  # Strong negative hashtags
+                        category = 0  # Bump down to at least negative
                 
                 # Emoji override
                 if emoji_info["emojis"] and len(emoji_info["emojis"]) > 0:
-                    if emoji_sentiment > 0.8 and category < 4:
-                        category = 4
-                    elif emoji_sentiment > 0.6 and category < 3:
-                        category = 3
+                    if emoji_sentiment > 0.8 and category < 2:
+                        category = 2
+                    elif emoji_sentiment > 0.6 and category < 2:
+                        category = 2
                     elif emoji_sentiment < -0.8 and category > 0:
                         category = 0
-                    elif emoji_sentiment < -0.6 and category > 1:
-                        category = 1
+                    elif emoji_sentiment < -0.6 and category > 0:
+                        category = 0
                 
                 # Sarcasm flips sentiment
                 if sarcasm:
                     if label == "POSITIVE":
-                        category = 1
+                        category = 0
                     else:
-                        category = 3
+                        category = 2
                     predictions.append(category)
                     continue
                 # Emoji sequence override
-                if emoji_sequence_sentiment > 0 and category < 3:
-                    category = 3
-                elif emoji_sequence_sentiment < 0 and category > 1:
-                    category = 1
+                if emoji_sequence_sentiment > 0 and category < 2:
+                    category = 2
+                elif emoji_sequence_sentiment < 0 and category > 0:
+                    category = 0
                 # Negation scope override
                 if neg_scope_pos:
-                    category = 1
+                    category = 0
                 if neg_scope_neg:
-                    category = 3
+                    category = 2
                 # Intensifier adjustment
                 if intensifier > 1.0:
-                    if category == 3:
-                        category = 4
-                    elif category == 1:
+                    if category == 2:
+                        category = 2
+                    elif category == 0:
                         category = 0
                 # Domain-specific lexicon
-                if domain_pos and category < 3:
-                    category = 3
-                if domain_neg and category > 1:
-                    category = 1
+                if domain_pos and category < 2:
+                    category = 2
+                if domain_neg and category > 0:
+                    category = 0
             
             predictions.append(category)
             
@@ -1116,7 +1117,7 @@ class SentimentModel:
             return {"error": "No texts to analyze"}
         
         # Calculate distribution
-        sentiment_distribution = {i: predictions.count(i) for i in range(5)}
+        sentiment_distribution = {i: predictions.count(i) for i in range(3)}
         total_texts = len(predictions)
         sentiment_percentages = {
             self.get_sentiment_label(k): round((v / total_texts) * 100, 1) 
@@ -1124,8 +1125,8 @@ class SentimentModel:
         }
         
         # Calculate overall sentiment score (-100 to 100 scale)
-        # Weight: overwhelmingly negative = -2, negative = -1, neutral = 0, positive = 1, overwhelmingly positive = 2
-        weights = {0: -2, 1: -1, 2: 0, 3: 1, 4: 2}
+        # Weight: negative = -1, neutral = 0, positive = 1
+        weights = {0: -1, 1: 0, 2: 1}
         weighted_sum = sum(weights[pred] * 50 for pred in predictions)  # Scale to -100 to 100
         overall_score = weighted_sum / total_texts
         
@@ -1151,13 +1152,13 @@ class SentimentModel:
         positive_words = []
         negative_words = []
         for text, pred in zip(texts_list, predictions):
-            if pred >= 3:  # Positive or overwhelmingly positive
+            if pred == 2:  # Positive
                 # Extract positive keywords
                 text_lower = text.lower()
                 found_positive = [word for word in self.very_positive_keywords + self.positive_keywords 
                                  if word in text_lower]
                 positive_words.extend(found_positive)
-            elif pred <= 1:  # Negative or overwhelmingly negative
+            elif pred == 0:  # Negative
                 # Extract negative keywords
                 text_lower = text.lower()
                 found_negative = [word for word in self.very_negative_keywords + self.negative_keywords 
@@ -1215,6 +1216,71 @@ class SentimentModel:
                 "parliament", "political", "policy", "campaign", "party", "republican", 
                 "democrat", "congress", "senator", "liberal", "conservative", "law", 
                 "legislation", "rights", "freedom"
+            ],
+            "conflict": [
+                "war", "conflict", "battle", "violence", "geopolitics", "diplomacy", "peace talks",
+                "ceasefire", "military", "invasion", "occupation", "civil war", "insurgency",
+                "guerrilla", "terrorism", "extremism", "militant", "rebellion", "resistance",
+                "airstrike", "bombardment", "artillery", "combat", "hostilities", "offensive",
+                "peacekeeping", "demilitarized zone", "siege", "armistice", "treaty", "atrocity",
+                "humanitarian crisis", "refugee crisis", "civilian casualties", "collateral damage",
+                # New keywords
+                "armed conflict", "proxy war", "ethnic cleansing", "genocide", "massacre", 
+                "human rights abuse", "torture", "disarmament", "sanctions", "aggression",
+                "intervention", "war crimes", "casualties", "escalation", "truce",
+                "no-fly zone", "buffer zone", "frontline", "warzone", "troops", "deployment",
+                "guerrilla warfare", "insurgent", "insurrection", "coup", "revolution",
+                "uprising", "counterinsurgency", "raid", "assault", "hostage", "militia"
+            ],
+            "regional_tensions": [
+                "kashmir", "india", "pakistan", "border dispute", "ceasefire", "pahalgam", "tourism",
+                "hindu", "muslim", "religious conflict", "communal violence", "riots", "sectarianism",
+                "ukraine", "russia", "crimea", "donbas", "nato", "putin", "zelenskyy",
+                "israel", "gaza", "palestine", "west bank", "hamas", "idf", "hezbollah", "netanyahu",
+                "china", "taiwan", "south china sea", "trade war", "xi jinping", "territorial dispute",
+                "north korea", "south korea", "dmz", "nuclear test", "missile launch",
+                "myanmar", "rohingya", "ethnic cleansing", "junta", "military coup",
+                "afghanistan", "taliban", "isis", "al-qaeda", "us withdrawal",
+                # New keywords
+                "territorial integrity", "sovereignty", "separatist", "secessionist", "autonomy",
+                "self-determination", "ethnic minority", "religious persecution", "forced migration",
+                "refugee camp", "internally displaced", "stateless", "border skirmish",
+                "demarcation line", "disputed territory", "annexation", "occupation",
+                "balkanization", "ethnic enclave", "buffer state", "proxy state",
+                "cultural genocide", "ethnic tensions", "religious extremism", "radicalization",
+                "interfaith conflict", "sunni", "shia", "orthodox", "fundamentalist", "militant"
+            ],
+            "economic_issues": [
+                "inflation", "recession", "economic downturn", "price hike", "cost of living",
+                "financial crisis", "market crash", "depression", "stagflation", "hyperinflation",
+                "unemployment", "layoffs", "job losses", "austerity", "bailout", "debt crisis",
+                "budget deficit", "economic sanctions", "trade embargo", "currency devaluation",
+                "stock market", "bear market", "bull market", "monetary policy", "interest rates",
+                "federal reserve", "central bank", "supply chain", "shortage", "rationing",
+                # New keywords
+                "economic collapse", "bankruptcy", "insolvency", "credit crunch", "liquidity crisis",
+                "sovereign debt", "bond yields", "fiscal policy", "taxation", "tax evasion",
+                "capital flight", "foreign investment", "divestment", "economic inequality", 
+                "wealth gap", "poverty line", "subsistence", "food insecurity", "housing crisis",
+                "homelessness", "wage stagnation", "minimum wage", "labor rights", "outsourcing",
+                "offshoring", "commodity prices", "energy crisis", "fuel shortage", "price gouging",
+                "black market", "informal economy", "underground economy", "economic sanctions"
+            ],
+            "controversy": [
+                "controversy", "scandal", "dispute", "allegation", "backlash", "boycott",
+                "outrage", "uproar", "protest", "demonstration", "petition", "criticism",
+                "accusation", "expose", "whistleblower", "cover-up", "conspiracy", "corruption",
+                "bribery", "embezzlement", "fraud", "misconduct", "impeachment", "resignation",
+                "lawsuit", "legal battle", "defamation", "slander", "libel", "censorship",
+                "ban", "cancellation", "deplatforming", "disinformation", "fake news",
+                # New keywords
+                "leaked documents", "sex scandal", "ethics violation", "conflict of interest",
+                "insider trading", "money laundering", "tax evasion", "nepotism", "cronyism",
+                "political bias", "media bias", "partisan", "polarization", "culture war",
+                "extremist views", "hate speech", "incitement", "propaganda", "misinformation",
+                "conspiracy theory", "denial", "revisionism", "public outrage", "moral panic",
+                "call-out", "accountability", "apology demand", "public relations crisis",
+                "damage control", "reputation management", "gag order", "non-disclosure"
             ],
             "technology": [
                 "tech", "technology", "software", "hardware", "app", "device", "update", 
@@ -1322,17 +1388,15 @@ class SentimentModel:
             return {"error": "No texts to analyze"}
         
         # Basic sentiment distribution for pie/donut chart
-        sentiment_counts = {i: predictions.count(i) for i in range(5)}
-        sentiment_labels = [self.get_sentiment_label(i) for i in range(5)]
+        sentiment_counts = {i: predictions.count(i) for i in range(3)}
+        sentiment_labels = [self.get_sentiment_label(i) for i in range(3)]
         sentiment_data = {
             "labels": sentiment_labels,
-            "counts": [sentiment_counts.get(i, 0) for i in range(5)],
+            "counts": [sentiment_counts.get(i, 0) for i in range(3)],
             "colors": [
-                "#e74c3c",  # overwhelmingly negative (red)
-                "#f39c12",  # negative (orange)
+                "#e74c3c",  # negative (red)
                 "#7f8c8d",  # neutral (gray)
-                "#3498db",  # positive (blue)
-                "#2ecc71"   # overwhelmingly positive (green)
+                "#2ecc71"   # positive (green)
             ]
         }
         
@@ -1367,8 +1431,8 @@ class SentimentModel:
         
         Args:
             text: The text that was analyzed
-            original_prediction: The original prediction category (0-4)
-            corrected_prediction: The corrected prediction category (0-4) from user
+            original_prediction: The original prediction category (0-2)
+            corrected_prediction: The corrected prediction category (0-2) from user
             save_feedback: Whether to save feedback to disk for future model training
             
         Returns:
@@ -1396,13 +1460,13 @@ class SentimentModel:
         
         # Determine what type of error occurred (e.g., false positive, false negative)
         error_type = None
-        if (original_prediction <= 1 and corrected_prediction >= 3) or (original_prediction >= 3 and corrected_prediction <= 1):
+        if (original_prediction == 0 and corrected_prediction == 2) or (original_prediction == 2 and corrected_prediction == 0):
             error_type = "polarity_error"  # Complete polarity reversal
         elif abs(original_prediction - corrected_prediction) == 1:
             error_type = "intensity_error"  # Intensity error (e.g., positive vs. very positive)
-        elif original_prediction == 2 and corrected_prediction != 2:
+        elif original_prediction == 1 and corrected_prediction != 1:
             error_type = "neutrality_error"  # Incorrectly classified as neutral
-        elif original_prediction != 2 and corrected_prediction == 2:
+        elif original_prediction != 1 and corrected_prediction == 1:
             error_type = "sentiment_error"  # Should have been neutral
         
         # Create feedback entry
@@ -1598,6 +1662,72 @@ class SentimentModel:
         
         return result
 
+    def analyze_sentiment(self, text):
+        """Analyze the sentiment of the given text using the configured model and enhancements.
+        
+        Args:
+            text: The text to analyze
+            
+        Returns:
+            A dict with sentiment analysis results including label and score
+        """
+        if not text or not isinstance(text, str):
+            logger.warning(f"Invalid input text: {text}")
+            return {"label": "NEUTRAL", "score": 0.5}
+            
+        # Log the request with timestamp
+        log_timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        logger.info(f"[{log_timestamp}] Analyzing sentiment for text: {text[:100]}{'...' if len(text) > 100 else ''}")
+        
+        # Summarize long texts if BART is enabled
+        original_text = text
+        if self.use_bart and len(text.split()) > 100:
+            try:
+                summary = self.bart_pipeline(text, max_length=100, min_length=30, do_sample=False)[0]['summary_text']
+                logger.info(f"Summarized text using BART from {len(text.split())} words to {len(summary.split())} words")
+                text = summary
+            except Exception as e:
+                logger.error(f"Error during BART summarization: {str(e)}")
+        
+        # Enhance with RAG if enabled
+        enhanced_text = text
+        if self.use_rag and self.rag:
+            try:
+                context = self.rag.retrieve_context(text)
+                enhanced_text = self.rag.enhance_input(text, context)
+                logger.info(f"Enhanced text with RAG context")
+            except Exception as e:
+                logger.error(f"Error during RAG enhancement: {str(e)}")
+                
+        # Analyze sentiment using the pre-trained model
+        try:
+            # Use the enhanced text for sentiment analysis
+            result = self.analyzer(enhanced_text)[0]
+            sentiment = result["label"]
+            confidence = result["score"]
+            
+            # RoBERTa model uses different labels, need to standardize
+            if self.model_type == "roberta":
+                # Map RoBERTa labels to our standard format
+                label_mapping = {
+                    "LABEL_0": "NEGATIVE",
+                    "LABEL_1": "NEUTRAL",
+                    "LABEL_2": "POSITIVE"
+                }
+                sentiment = label_mapping.get(sentiment, sentiment)
+            
+            # Log the results
+            logger.info(f"Sentiment analysis result: {sentiment} with confidence {confidence:.4f}")
+            
+            # Add metadata about RAG and BART usage
+            result["enhanced_with_rag"] = self.use_rag and self.rag is not None
+            result["summarized_with_bart"] = self.use_bart and len(original_text.split()) > 100
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error during sentiment analysis: {str(e)}")
+            return {"label": "NEUTRAL", "score": 0.5}
 
 def create_and_test_model():
     """Create a sentiment analysis model and test it on sample texts."""
@@ -1699,7 +1829,7 @@ def create_and_test_model():
     
     # Calculate statistics on test results
     all_predictions = predictions + calibration_results + extended_results + edge_case_results + hashtag_results
-    count_by_category = {i: all_predictions.count(i) for i in range(5)}
+    count_by_category = {i: all_predictions.count(i) for i in range(3)}
     print("\nDistribution of predictions:")
     for category_index, count in count_by_category.items():
         category_name = model.get_sentiment_label(category_index)
